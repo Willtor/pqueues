@@ -1,0 +1,160 @@
+/* Fixed height skiplist: A skiplist implementation with an array of "next"
+ * nodes of fixed height.
+ */
+
+typedef node =
+    { val      u64,            // Value.
+      toplevel i32,
+      next     [20]*node       // Follow-list of nodes.
+    };
+
+export opaque
+typedef fhsl_lf =
+    { head  node,
+      tail  node
+    };
+
+/** Return a new fixed-height skip list.
+ */
+export
+def fhsl_lf_create () -> *fhsl_lf
+begin
+    var fhsl_lf = new fhsl_lf;
+    fhsl_lf.head.val = 0;
+    fhsl_lf.tail.val = -1U64;
+    for var i = 0; i < 20; ++i do
+        fhsl_lf.head.next[i] = &fhsl_lf.tail;
+        fhsl_lf.tail.next[i] = nil;
+    od
+    return fhsl_lf;
+end
+
+/** Add a node, lock-free, to the skiplist.
+ */
+export
+def fhsl_lf_add (seed *u64, set *fhsl_lf, x u64) -> bool
+begin
+    var preds [20]*node;
+    var succs [20]*node;
+    var toplevel = random_level(seed, 20);
+    while true do
+        if true == find(set, x, preds, succs) then
+            return false;
+        else
+            var node = new node;
+            node.val = x;
+            node.toplevel = toplevel;
+            for var i = 0; i <= toplevel; ++i do
+                node.next[i] = unmark(succs[i]);
+            od
+            var pred = preds[0];
+            var succ = succs[0];
+            if !__builtin_cas(&pred.next[0], unmark(succ), node) then
+                continue;
+            fi
+            for var i = 1; i < toplevel; ++i do
+                while true do
+                    pred = preds[i];
+                    succ = succs[i];
+                    if __builtin_cas(&pred.next[i], unmark(succ), node) then
+                        break;
+                    fi
+                    find(set, x, preds, succs);
+                od
+            od
+            return true;
+        fi
+    od
+end
+
+/** Remove a node, lock-free, from the skiplist.
+ */
+export
+def fhsl_lf_remove (seed *u64, set *fhsl_lf, x u64) -> bool
+begin
+    var preds [20]*node;
+    var succs [20]*node;
+    var succ *node;
+    while true do
+        if false == find(set, x, preds, succs) then
+            return false;
+        else
+            var node_to_remove = succs[0];
+            var marked bool;
+            for var level = node_to_remove.toplevel;
+                level >= 1;
+                --level
+            do
+                succ = node_to_remove.next[level];
+                marked = is_marked(succ);
+                while !marked do
+                    __builtin_cas(&node_to_remove.next[level], unmark(succ),
+                                  mark(succ));
+                    succ = node_to_remove.next[level];
+                    marked = is_marked(succ);
+                od
+            od
+            succ = node_to_remove.next[0];
+            marked = is_marked(succ);
+            while true do
+                var i_marked_it = __builtin_cas(&node_to_remove.next[0],
+                                                unmark(succ), mark(succ));
+                succ = succs[0].next[0];
+                marked = is_marked(succ);
+                if i_marked_it then
+                    find(set, x, preds, succs);
+                    return true;
+                elif marked then
+                    return false;
+                fi
+            od
+        fi
+    od
+end
+
+def fast_rand (seed *u64) -> u64
+begin
+    if seed[0] == 0 then seed[0] = 1; fi
+    seed[0] *= 0xFFFFFFFFFFFFFFC5U64;
+    return seed[0];
+end
+
+def random_level (seed *u64, max u32) -> u32
+begin
+    var level = 1;
+    while fast_rand(seed) %2 == 0 && level < max do
+        ++level;
+    od
+    return level - 1;
+end
+
+def find (set *fhsl_lf,
+          key u64,
+          preds [20]*node,
+          succs [20]*node) -> bool
+begin
+    var lfound = -1;
+    var pred = &set.head;
+    for var level = 20; level >= 0; --level do
+        var curr volatile *node = pred.next[level];
+        while key > curr.val do
+            pred = curr;
+            curr = pred.next[level];
+        od
+        if lfound == -1 && key == curr.val then
+            lfound = level;
+        fi
+        preds[level] = pred;
+        succs[level] = curr;
+    od
+    return true;
+end
+
+def mark (ptr *node) -> *node =
+    cast(type *node, 0x1I64 | cast(type i64, ptr));
+
+def unmark (ptr *node) -> *node =
+    cast(type *node, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
+
+def is_marked (ptr *node) -> bool =
+    cast(type bool, 0x1I64 & cast(type i64, ptr));

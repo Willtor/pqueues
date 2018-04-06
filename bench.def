@@ -1,0 +1,46 @@
+import "pthread.h";
+import "stdio.h";
+import "stdlib.h";
+
+typedef benchmark_t = enum
+    | LF_SKIPLIST
+    ;
+
+typedef config_t =
+    {
+        benchmark benchmark_t
+    };
+
+def help () -> void
+begin
+    puts("help message tbd.");
+    exit(127);
+end
+
+def read_args (argc i32, argv **char) -> config_t
+begin
+    var config config_t =
+        { LF_SKIPLIST };
+
+    for var i = 1; i < argc; ++i do
+        switch argv[i] with
+        xcase "-h":
+        ocase "--help":
+            help(); // no return.
+        xcase _:
+            printf("unknown option: %s\n", argv[i]);
+            exit(1);
+        esac
+    od
+
+    return config;
+end
+
+export
+def main (argc i32, argv **char) -> i32
+begin
+    var config = read_args(argc, argv);
+
+    puts("done.");
+    return 0;
+end
