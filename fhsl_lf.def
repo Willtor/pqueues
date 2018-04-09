@@ -104,7 +104,7 @@ end
 /** Remove a node, lock-free, from the skiplist.
  */
 export
-def fhsl_lf_remove (seed *u64, set *fhsl_lf, x u64) -> bool
+def fhsl_lf_remove (set *fhsl_lf, x u64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
