@@ -114,15 +114,21 @@ end
 
 def fast_rand (seed *u64) -> u64
 begin
-    if seed[0] == 0 then seed[0] = 1; fi
-    seed[0] *= 0xFFFFFFFFFFFFFFC5U64;
-    return seed[0];
+    var val = seed[0];
+    if val == 0 then val = 1; fi
+
+    val ^= val << 6;
+    val ^= val >> 21;
+    val ^= val << 7;
+
+    seed[0] = val;
+    return val;
 end
 
 def random_level (seed *u64, max u32) -> u32
 begin
     var level = 1;
-    while fast_rand(seed) %2 == 0 && level < max do
+    while fast_rand(seed) % 2 == 0 && level < max do
         ++level;
     od
     return level - 1;
@@ -135,7 +141,7 @@ def find (set *fhsl_lf,
 begin
     var lfound = -1;
     var pred = &set.head;
-    for var level = 20; level >= 0; --level do
+    for var level = 19; level >= 0; --level do
         var curr volatile *node = pred.next[level];
         while key > curr.val do
             pred = curr;
@@ -147,7 +153,7 @@ begin
         preds[level] = pred;
         succs[level] = curr;
     od
-    return true;
+    return lfound >= 0;
 end
 
 def mark (ptr *node) -> *node =
