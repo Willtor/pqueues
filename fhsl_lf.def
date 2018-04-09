@@ -2,6 +2,8 @@
  * nodes of fixed height.
  */
 
+import "stdio.h";
+
 typedef node =
     { val      u64,            // Value.
       toplevel i32,
@@ -13,6 +15,18 @@ typedef fhsl_lf =
     { head  node,
       tail  node
     };
+
+/** Print out the contents of the skip list along with node heights.
+ */
+export
+def fhsl_lf_print (set *fhsl_lf) -> void
+begin
+    var node = set.head.next[0];
+    while node != &set.tail do
+        printf("node[%d]: %llu\n", node.toplevel, node.val);
+        node = unmark(node.next[0]);
+    od
+end
 
 /** Return a new fixed-height skip list.
  */
@@ -27,6 +41,26 @@ begin
         fhsl_lf.tail.next[i] = nil;
     od
     return fhsl_lf;
+end
+
+/** Return whether the skip list contains the value.
+ */
+export
+def fhsl_lf_contains (set *fhsl_lf, x u64) -> bool
+begin
+    var node = &set.head;
+    for var level = 19; level >= 0; --level do
+        var next = unmark(node.next[level]);
+        while next.val <= x do
+            node = next;
+            next = unmark(node.next[level]);
+        od
+        if node.val == x then
+            if !is_marked(node.next[0]) then return true; fi
+            return false;
+        fi
+    od
+    return false;
 end
 
 /** Add a node, lock-free, to the skiplist.
