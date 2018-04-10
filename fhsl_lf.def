@@ -23,9 +23,10 @@ def fhsl_lf_print (set *fhsl_lf) -> void
 begin
     var node = set.head.next[0];
     while unmark(node) != &set.tail do
-        if is_marked(node) then
+        if is_marked(node.next[0]) then
             node = unmark(node).next[0];
         else
+            node = unmark(node);
             printf("node[%d]: %llu\n", node.toplevel, node.val);
             node = node.next[0];
         fi
@@ -52,6 +53,8 @@ end
 export
 def fhsl_lf_contains (set *fhsl_lf, x u64) -> bool
 begin
+    // FIXME: Nir's book does this differently.  Figure out whether this
+    // still works and maybe replace.
     var node = &set.head;
     for var level = 19; level >= 0; --level do
         var next = unmark(node.next[level]);
@@ -177,21 +180,37 @@ def find (set *fhsl_lf,
           preds [20]*node,
           succs [20]*node) -> bool
 begin
-    var lfound = -1;
-    var pred = &set.head;
-    for var level = 19; level >= 0; --level do
-        var curr volatile *node = pred.next[level];
-        while key > curr.val do
-            pred = curr;
-            curr = pred.next[level];
+    var marked, snip bool;
+    var pred, curr, succ *node = nil, nil, nil;
+retry:
+    while true do
+        pred = &set.head;
+        for var level = 19; level >= 0; --level do
+            curr = unmark(pred.next[level]);
+            while true do
+                succ = curr.next[level];
+                marked = is_marked(succ);
+                succ = unmark(succ);
+                while marked do
+                    snip = __builtin_cas(&pred.next[level], curr, succ);
+                    if !snip then goto retry; fi
+                    curr = unmark(pred.next[level]);
+                    succ = curr.next[level];
+                    marked = is_marked(succ);
+                    succ = unmark(succ);
+                od
+                if curr.val < key then
+                    pred = curr;
+                    curr = succ;
+                else
+                    break;
+                fi
+            od
+            preds[level] = pred;
+            succs[level] = curr;
         od
-        if lfound == -1 && key == curr.val then
-            lfound = level;
-        fi
-        preds[level] = pred;
-        succs[level] = curr;
+        return curr.val == key;
     od
-    return lfound >= 0;
 end
 
 def mark (ptr *node) -> *node =
