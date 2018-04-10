@@ -22,9 +22,13 @@ export
 def fhsl_lf_print (set *fhsl_lf) -> void
 begin
     var node = set.head.next[0];
-    while node != &set.tail do
-        printf("node[%d]: %llu\n", node.toplevel, node.val);
-        node = unmark(node.next[0]);
+    while unmark(node) != &set.tail do
+        if is_marked(node) then
+            node = unmark(node).next[0];
+        else
+            printf("node[%d]: %llu\n", node.toplevel, node.val);
+            node = node.next[0];
+        fi
     od
 end
 
