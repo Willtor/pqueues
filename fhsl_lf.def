@@ -188,16 +188,12 @@ retry:
         for var level = 19; level >= 0; --level do
             curr = unmark(pred.next[level]);
             while true do
-                succ = curr.next[level];
-                marked = is_marked(succ);
-                succ = unmark(succ);
+                { succ, marked } = ref_and_markbit(curr.next[level]);
                 while marked do
                     snip = __builtin_cas(&pred.next[level], curr, succ);
                     if !snip then goto retry; fi
                     curr = unmark(pred.next[level]);
-                    succ = curr.next[level];
-                    marked = is_marked(succ);
-                    succ = unmark(succ);
+                    { succ, marked } = ref_and_markbit(curr.next[level]);
                 od
                 if curr.val < key then
                     pred = curr;
@@ -212,6 +208,9 @@ retry:
         return curr.val == key;
     od
 end
+
+def ref_and_markbit (ptr *node) -> { *node, bool } =
+    { unmark(ptr), is_marked(ptr) };
 
 def mark (ptr *node) -> *node =
     cast(type *node, 0x1I64 | cast(type i64, ptr));
