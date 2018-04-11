@@ -1,4 +1,4 @@
-DEF = ../compiler/build/bin/def
+DEF = def
 DEFGHI = defghi
 TARGET = pqueue_bench
 
