@@ -1,10 +1,11 @@
-DEF = def
+DEF = ../compiler/build/bin/def
 DEFGHI = defghi
 TARGET = pqueue_bench
 
 DEFFLAGS = -O3
 
 DATASTRUCTS = fhsl_lf.def
+DEFIFILES = $(DATASTRUCTS:.def=.defi)
 SRC = $(DATASTRUCTS) bench.def
 OBJ = $(SRC:.def=.o)
 
@@ -16,7 +17,9 @@ $(TARGET): $(SRC:.def=.o)
 clean:
 	rm -f $(TARGET) *.defi *.o
 
-%.o: %.def %.defi
+bench.o: $(DEFIFILES)
+
+%.o: %.def
 	$(DEF) -o $@ $(DEFFLAGS) -c $<
 
 %.defi: %.def

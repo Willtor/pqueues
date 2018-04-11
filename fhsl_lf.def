@@ -5,8 +5,8 @@
 import "stdio.h";
 
 typedef node =
-    { val      u64,            // Value.
-      toplevel i32,
+    { val      i64,            // Value.
+      toplevel i32,            // Height.
       next     [20]*node       // Follow-list of nodes.
     };
 
@@ -27,7 +27,7 @@ begin
             node = unmark(node).next[0];
         else
             node = unmark(node);
-            printf("node[%d]: %llu\n", node.toplevel, node.val);
+            printf("node[%d]: %lld\n", node.toplevel, node.val);
             node = node.next[0];
         fi
     od
@@ -39,8 +39,8 @@ export
 def fhsl_lf_create () -> *fhsl_lf
 begin
     var fhsl_lf = new fhsl_lf;
-    fhsl_lf.head.val = 0;
-    fhsl_lf.tail.val = -1U64;
+    fhsl_lf.head.val = 0x8000000000000000I64;
+    fhsl_lf.tail.val = 0x7FFFFFFFFFFFFFFFI64;
     for var i = 0; i < 20; ++i do
         fhsl_lf.head.next[i] = &fhsl_lf.tail;
         fhsl_lf.tail.next[i] = nil;
@@ -73,7 +73,7 @@ end
 /** Add a node, lock-free, to the skiplist.
  */
 export
-def fhsl_lf_add (seed *u64, set *fhsl_lf, x u64) -> bool
+def fhsl_lf_add (seed *u64, set *fhsl_lf, x i64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -111,7 +111,7 @@ end
 /** Remove a node, lock-free, from the skiplist.
  */
 export
-def fhsl_lf_remove (set *fhsl_lf, x u64) -> bool
+def fhsl_lf_remove (set *fhsl_lf, x i64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -176,7 +176,7 @@ begin
 end
 
 def find (set *fhsl_lf,
-          key u64,
+          key i64,
           preds [20]*node,
           succs [20]*node) -> bool
 begin

@@ -1,3 +1,5 @@
+import "fhsl_lf.defi";
+import "forkscan.defi";
 import "pthread.h";
 import "stdio.h";
 import "stdlib.h";
@@ -6,12 +8,41 @@ typedef benchmark_t = enum
     | FHSL_LF
     ;
 
+typedef state_t = enum
+    | STATE_WAIT
+    | STATE_RUN
+    | STATE_END
+    ;
+
 typedef config_t =
     {
         benchmark      benchmark_t,
         duration_s     i32,
-        thread_count   i32
+        thread_count   i32,
+        init_size      i64,
+        upper_bound    i64,
+        set            *void
     };
+
+typedef per_thread_data_t =
+    {
+        config         *config_t,
+        id             i32,
+        state          volatile *state_t
+    };
+
+def fast_rand (seed *u64) -> u64
+begin
+    var val = seed[0];
+    if val == 0 then val = 1; fi
+
+    val ^= val << 6;
+    val ^= val >> 21;
+    val ^= val << 7;
+
+    seed[0] = val;
+    return val;
+end
 
 def string_of_benchmark (b benchmark_t) -> *char
 begin
@@ -30,6 +61,8 @@ begin
     printf("  -d <n>: Benchmark duration in seconds. (default = 1)\n");
     printf("  -b <benchmark>: Set the benchmark. (default = fhsl_lf)\n");
     printf("     * fhsl_lf: Fixed-height skip list; lock-free.\n");
+    printf("  -i <n>: Initial set size. (default = 256)\n");
+    printf("  -r <n>: Range upper bound [0-n). (default = 512)\n");
     exit(127);
 end
 
@@ -47,10 +80,24 @@ begin
     return n;
 end
 
+/** Parse an i64 from txt in the range [low, high].  The err text is the
+ *  command line option and is used in case of failure.
+ */
+def read_i64 (low i64, high i64, txt *char, err *char) -> i64
+begin
+    var n = atoll(txt);
+    if n < low || n > high then
+        fprintf(stderr, "error: %s requires an argument between %lld and %lld\n",
+                err, low, high);
+        exit(1);
+    fi
+    return n;
+end
+
 def read_args (argc i32, argv **char) -> config_t
 begin
     var config config_t =
-        { FHSL_LF, 1, 1 };
+        { FHSL_LF, 1, 1, 256, 512, nil };
 
     for var i = 1; i < argc; ++i do
         switch argv[i] with
@@ -83,6 +130,22 @@ begin
                 printf("unknown benchmark: %s\n", argv[i]);
                 exit(1);
             esac
+        xcase "-i":
+            ++i;
+            if i >= argc then
+                fprintf(stderr, "error: -i requires an argument.\n");
+                exit(1);
+            fi
+            config.init_size =
+                read_i64(1, 0x7FFFFFFFFFFFFFFFI64, argv[i], "-i");
+        xcase "-r":
+            ++i;
+            if i >= argc then
+                fprintf(stderr, "error: -r requires an argument.\n");
+                exit(1);
+            fi
+            config.upper_bound =
+                read_i64(1, 0x7FFFFFFFFFFFFFFFI64, argv[i], "-r");
         xcase _:
             printf("unknown option: %s\n", argv[i]);
             exit(1);
@@ -99,43 +162,90 @@ begin
     printf("  benchmark    : %s\n", string_of_benchmark(config.benchmark));
     printf("  duration (s) : %d\n", config.duration_s);
     printf("  thread count : %d\n", config.thread_count);
+    printf("  initial size : %lld\n", config.init_size);
+    printf("  range        : [0-%lld)\n", config.upper_bound);
 
     puts(""); // blank line.
 end
 
 def thread (arg *void) -> *void
 begin
+    var ptd = cast(type *per_thread_data_t, arg);
+    printf("[started thread %d]\n", ptd.id);
+    while ptd.state[0] == STATE_WAIT do
+        // busy-wait.
+    od
 
+    while ptd.state[0] == STATE_RUN do
+
+    od
     return nil;
+end
+
+def initialize_set (config *config_t, seed *u64) -> void
+begin
+    switch config.benchmark with
+    xcase FHSL_LF:
+        var set = fhsl_lf_create();
+        for var i = 0; i < config.init_size; ++i do
+            var val = fast_rand(seed);
+            if false == fhsl_lf_add(seed, set, val % config.upper_bound) then
+                --i;
+            fi
+        od
+        config.set = set;
+    xcase _:
+        printf("error: unable to initialize unknown set.\n");
+        exit(1);
+    esac
 end
 
 export
 def main (argc i32, argv **char) -> i32
 begin
     var config = read_args(argc, argv);
+    var seed = 0U64;
+    var state = STATE_WAIT;
     print_config(&config);
+
+    printf("Initializing set.\n");
+    initialize_set(&config, &seed);
 
     printf("Starting threads.\n");
     var tids *pthread_t = new [config.thread_count]pthread_t;
+    var ptds *per_thread_data_t = new [config.thread_count]per_thread_data_t;
     for var i = 0; i < config.thread_count; ++i do
-        var ret = pthread_create(&tids[i], nil, thread, nil);
+        ptds[i] =
+            { &config,
+              i,
+              &state
+            };
+        var ret = pthread_create(&tids[i], nil, thread, &ptds[i]);
         if ret != 0 then
-            printf("failed to create thread id: %d\n", i);
+            printf("error: failed to create thread id: %d\n", i);
             exit(1);
         fi
-        printf("[started thread %d]\n", i);
     od
 
+    puts("begin");
+
+    state = STATE_RUN;
+    // Robust sleep against Forkscan signals.
+    forkscan_sleep(config.duration_s);
+    state = STATE_END;
+
+    puts("end");
     printf("Joining threads.\n");
     for var i = 0; i < config.thread_count; ++i do
         var ret = pthread_join(tids[i], nil);
         if ret != 0 then
-            printf("failed to join thread id: %d\n", i);
+            printf("error: failed to join thread id: %d\n", i);
             exit(1);
         fi
         printf("[joined thread %d]\n", i);
     od
 
-    puts("done.");
+    delete tids;
+    delete ptds;
     return 0;
 end
