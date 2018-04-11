@@ -3,30 +3,86 @@ import "stdio.h";
 import "stdlib.h";
 
 typedef benchmark_t = enum
-    | LF_SKIPLIST
+    | FHSL_LF
     ;
 
 typedef config_t =
     {
-        benchmark benchmark_t
+        benchmark      benchmark_t,
+        duration_s     i32,
+        thread_count   i32
     };
 
-def help () -> void
+def string_of_benchmark (b benchmark_t) -> *char
 begin
-    puts("help message tbd.");
+    switch b with
+    xcase FHSL_LF: return "fhsl_lf";
+    xcase _: return "unknown benchmark";
+    esac
+    return "FIXME: need reachability detection after a switch.";
+end
+
+def help (bench *char) -> void
+begin
+    printf("Usage: %s [OPTIONS]\n", bench);
+    printf("  -h, --help: This help message.\n");
+    printf("  -t <n>: Set the number of threads. (default = 1)\n");
+    printf("  -d <n>: Benchmark duration in seconds. (default = 1)\n");
+    printf("  -b <benchmark>: Set the benchmark. (default = fhsl_lf)\n");
+    printf("     * fhsl_lf: Fixed-height skip list; lock-free.\n");
     exit(127);
+end
+
+/** Parse an i32 from txt in the range [low, high].  The err text is the
+ *  command line option and is used in case of failure.
+ */
+def read_i32 (low i32, high i32, txt *char, err *char) -> i32
+begin
+    var n = atoi(txt);
+    if n < low || n > high then
+        fprintf(stderr, "error: %s requires an argument between %d and %d\n",
+                err, low, high);
+        exit(1);
+    fi
+    return n;
 end
 
 def read_args (argc i32, argv **char) -> config_t
 begin
     var config config_t =
-        { LF_SKIPLIST };
+        { FHSL_LF, 1, 1 };
 
     for var i = 1; i < argc; ++i do
         switch argv[i] with
         xcase "-h":
         ocase "--help":
-            help(); // no return.
+            help(argv[0]); // no return.
+        xcase "-t":
+            ++i;
+            if i >= argc then
+                fprintf(stderr, "error: -t requires an argument.\n");
+                exit(1);
+            fi
+            config.thread_count = read_i32(1, 128, argv[i], "-t");
+        xcase "-d":
+            ++i;
+            if i >= argc then
+                fprintf(stderr, "error: -d requires an argument.\n");
+                exit(1);
+            fi
+            config.duration_s = read_i32(1, 999, argv[i], "-d");
+        xcase "-b":
+            ++i;
+            if i >= argc then
+                fprintf(stderr, "error: -b requires an argument.\n");
+                exit(1);
+            fi
+            switch argv[i] with
+            xcase "fhsl_lf": config.benchmark = FHSL_LF;
+            xcase _:
+                printf("unknown benchmark: %s\n", argv[i]);
+                exit(1);
+            esac
         xcase _:
             printf("unknown option: %s\n", argv[i]);
             exit(1);
@@ -36,10 +92,49 @@ begin
     return config;
 end
 
+def print_config (config *config_t) -> void
+begin
+    printf("Benchmark configuration\n");
+    printf("--------- -------------\n");
+    printf("  benchmark    : %s\n", string_of_benchmark(config.benchmark));
+    printf("  duration (s) : %d\n", config.duration_s);
+    printf("  thread count : %d\n", config.thread_count);
+
+    puts(""); // blank line.
+end
+
+def thread (arg *void) -> *void
+begin
+
+    return nil;
+end
+
 export
 def main (argc i32, argv **char) -> i32
 begin
     var config = read_args(argc, argv);
+    print_config(&config);
+
+    printf("Starting threads.\n");
+    var tids *pthread_t = new [config.thread_count]pthread_t;
+    for var i = 0; i < config.thread_count; ++i do
+        var ret = pthread_create(&tids[i], nil, thread, nil);
+        if ret != 0 then
+            printf("failed to create thread id: %d\n", i);
+            exit(1);
+        fi
+        printf("[started thread %d]\n", i);
+    od
+
+    printf("Joining threads.\n");
+    for var i = 0; i < config.thread_count; ++i do
+        var ret = pthread_join(tids[i], nil);
+        if ret != 0 then
+            printf("failed to join thread id: %d\n", i);
+            exit(1);
+        fi
+        printf("[joined thread %d]\n", i);
+    od
 
     puts("done.");
     return 0;
