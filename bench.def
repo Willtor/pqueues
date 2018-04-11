@@ -1,8 +1,10 @@
-import "fhsl_lf.defi";
 import "forkscan.defi";
 import "pthread.h";
 import "stdio.h";
 import "stdlib.h";
+
+// Set data structures:
+import "fhsl_lf.defi";
 
 typedef benchmark_t = enum
     | FHSL_LF
@@ -24,11 +26,22 @@ typedef config_t =
         set            *void
     };
 
+typedef stats_t =
+    {
+        read_attempts     i64,
+        read_successes    i64,
+        insert_attempts   i64,
+        insert_successes  i64,
+        remove_attempts   i64,
+        remove_successes  i64
+    };
+
 typedef per_thread_data_t =
     {
         config         *config_t,
         id             i32,
-        state          volatile *state_t
+        state          volatile *state_t,
+        stats          stats_t
     };
 
 def fast_rand (seed *u64) -> u64
@@ -168,9 +181,30 @@ begin
     puts(""); // blank line.
 end
 
+def success_rate (attempts i64, successes i64) -> f64
+begin
+    if attempts == 0 then return 0.0F64; fi
+    return cast(type f64, successes) * 100.0F64 / cast(type f64, attempts);
+end
+
+def print_stats (stats *stats_t) -> void
+begin
+    printf("  read-attempts    : %lld\n", stats.read_attempts);
+    printf("  read-successes   : %lld (%.1f%%)\n", stats.read_successes,
+           success_rate(stats.read_attempts, stats.read_successes));
+    printf("  insert-attempts  : %lld\n", stats.insert_attempts);
+    printf("  insert-successes : %lld (%.1f%%)\n", stats.insert_successes,
+           success_rate(stats.insert_attempts, stats.insert_successes));
+    printf("  remove-attempts  : %lld\n", stats.remove_attempts);
+    printf("  remove-successes : %lld (%.1f%%)\n", stats.remove_successes,
+           success_rate(stats.remove_attempts, stats.remove_successes));
+end
+
 def thread (arg *void) -> *void
 begin
     var ptd = cast(type *per_thread_data_t, arg);
+    var stats stats_t = { 0, 0, 0, 0, 0, 0 };
+
     printf("[started thread %d]\n", ptd.id);
     while ptd.state[0] == STATE_WAIT do
         // busy-wait.
@@ -179,6 +213,9 @@ begin
     while ptd.state[0] == STATE_RUN do
 
     od
+
+    // Store this thread's statistics in the per-thread-data.
+    ptd.stats = stats;
     return nil;
 end
 
@@ -218,7 +255,8 @@ begin
         ptds[i] =
             { &config,
               i,
-              &state
+              &state,
+              { 0, 0, 0, 0, 0, 0 }
             };
         var ret = pthread_create(&tids[i], nil, thread, &ptds[i]);
         if ret != 0 then
@@ -244,6 +282,22 @@ begin
         fi
         printf("[joined thread %d]\n", i);
     od
+
+    // Print out the statistics.
+    var totals stats_t = { 0, 0, 0, 0, 0, 0 };
+    for var i = 0; i < config.thread_count; ++i do
+        printf("statistics for thread %d\n", i);
+        print_stats(&ptds[i].stats);
+        totals.read_attempts = ptds[i].stats.read_attempts;
+        totals.read_successes = ptds[i].stats.read_successes;
+        totals.insert_attempts = ptds[i].stats.insert_attempts;
+        totals.insert_successes = ptds[i].stats.insert_successes;
+        totals.remove_attempts = ptds[i].stats.remove_attempts;
+        totals.remove_successes = ptds[i].stats.remove_successes;
+    od
+
+    printf("total statistics:\n");
+    print_stats(&totals);
 
     delete tids;
     delete ptds;
