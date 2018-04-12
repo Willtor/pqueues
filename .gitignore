@@ -1,1 +1,3 @@
 *.o
+*.defi
+pqueue_bench

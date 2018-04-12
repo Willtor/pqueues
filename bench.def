@@ -1,6 +1,7 @@
 import "forkscan.defi";
 import "pthread.h";
 import "stdio.h";
+import "time.h";
 import "stdlib.h";
 
 // Set data structures:
@@ -64,6 +65,7 @@ def string_of_benchmark (b benchmark_t) -> *char
 begin
     switch b with
     xcase FHSL_LF: return "fhsl_lf";
+    xcase FHSL_B: return "fhsl_b";
     xcase _: return "unknown benchmark";
     esac
     return "FIXME: need reachability detection after a switch.";
@@ -77,6 +79,7 @@ begin
     printf("  -d <n>: Benchmark duration in seconds. (default = 1)\n");
     printf("  -b <benchmark>: Set the benchmark. (default = fhsl_lf)\n");
     printf("     * fhsl_lf: Fixed-height skip list; lock-free.\n");
+    printf("     * fhsl_b: Fixed-height skip list; blocking.\n");
     printf("  -i <n>: Initial set size. (default = 256)\n");
     printf("  -r <n>: Range upper bound [0-n). (default = 512)\n");
     printf("  -u <n>: Percent of ops that are updates. (default = 10)\n");
@@ -143,6 +146,7 @@ begin
             fi
             switch argv[i] with
             xcase "fhsl_lf": config.benchmark = FHSL_LF;
+            xcase "fhsl_b": config.benchmark = FHSL_B;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
                 exit(1);
@@ -214,16 +218,34 @@ end
 
 def thread (arg *void) -> *void
 begin
+    var seed = cast(type u64, time(nil));
     var ptd = cast(type *per_thread_data_t, arg);
     var stats stats_t = { 0, 0, 0, 0, 0, 0 };
+    var config *config_t= ptd.config;
 
     printf("[started thread %d]\n", ptd.id);
     while ptd.state[0] == STATE_WAIT do
         // busy-wait.
     od
 
+    var read_action = 100 - config.update_rate;
+    var add_action = read_action + config.update_rate / 2;
+    // TODO: Consider running for N operations before checking state again.
+    // Why load when you could be hammering the data-structure?
     while ptd.state[0] == STATE_RUN do
-
+      var action = fast_rand(&seed);
+      var val = fast_rand(&seed) % config.upper_bound;
+      if action < read_action then
+        stats.read_attempts++;
+        // FIXME: These commented lines trigger a bug in the compiler.
+        //if fhsl_lf_contains(config.set, val) then stats.read_successes++; fi
+      elif action < add_action then
+        stats.insert_attempts++;
+        //if fhsl_lf_add(&seed, config.set, val) then stats.insert_successes++; fi
+      else
+        stats.remove_attempts++;
+        //if fhsl_lf_remove(config.set, val) then stats.remove_successes++; fi
+      fi
     od
 
     // Store this thread's statistics in the per-thread-data.
@@ -253,7 +275,7 @@ export
 def main (argc i32, argv **char) -> i32
 begin
     var config = read_args(argc, argv);
-    var seed = 0U64;
+    var seed = cast(type u64, time(nil));
     var state = STATE_WAIT;
     print_config(&config);
 
