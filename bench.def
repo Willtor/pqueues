@@ -327,12 +327,12 @@ begin
     for var i = 0; i < config.thread_count; ++i do
         printf("statistics for thread %d\n", i);
         print_stats(&ptds[i].stats);
-        totals.read_attempts = ptds[i].stats.read_attempts;
-        totals.read_successes = ptds[i].stats.read_successes;
-        totals.insert_attempts = ptds[i].stats.insert_attempts;
-        totals.insert_successes = ptds[i].stats.insert_successes;
-        totals.remove_attempts = ptds[i].stats.remove_attempts;
-        totals.remove_successes = ptds[i].stats.remove_successes;
+        totals.read_attempts += ptds[i].stats.read_attempts;
+        totals.read_successes += ptds[i].stats.read_successes;
+        totals.insert_attempts += ptds[i].stats.insert_attempts;
+        totals.insert_successes += ptds[i].stats.insert_successes;
+        totals.remove_attempts += ptds[i].stats.remove_attempts;
+        totals.remove_successes += ptds[i].stats.remove_successes;
     od
 
     printf("total statistics:\n");
