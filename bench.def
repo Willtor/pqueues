@@ -205,6 +205,7 @@ end
 
 def print_stats (stats *stats_t) -> void
 begin
+    var total_ops i64 = 0;
     printf("  read-attempts    : %lld\n", stats.read_attempts);
     printf("  read-successes   : %lld (%.1f%%)\n", stats.read_successes,
            success_rate(stats.read_attempts, stats.read_successes));
@@ -214,6 +215,12 @@ begin
     printf("  remove-attempts  : %lld\n", stats.remove_attempts);
     printf("  remove-successes : %lld (%.1f%%)\n", stats.remove_successes,
            success_rate(stats.remove_attempts, stats.remove_successes));
+
+    total_ops = stats.read_successes
+        + stats.insert_successes
+        + stats.remove_successes;
+
+    printf("  total-operations : %lld\n", total_ops);
 end
 
 def thread (arg *void) -> *void
@@ -222,6 +229,7 @@ begin
     var ptd = cast(type *per_thread_data_t, arg);
     var stats stats_t = { 0, 0, 0, 0, 0, 0 };
     var config *config_t = ptd.config;
+    var bench = config.benchmark;
 
     printf("[started thread %d]\n", ptd.id);
     while ptd.state[0] == STATE_WAIT do
@@ -233,24 +241,32 @@ begin
     // TODO: Consider running for N operations before checking state again.
     // Why load when you could be hammering the data-structure?
     while ptd.state[0] == STATE_RUN do
-        var action = fast_rand(&seed) % 100;
-        var val = fast_rand(&seed) % config.upper_bound;
-        if action < read_action then
-            stats.read_attempts++;
-            if fhsl_lf_contains(config.set, val) then
-                stats.read_successes++;
-            fi
-        elif action < add_action then
-            stats.insert_attempts++;
-            if fhsl_lf_add(&seed, config.set, val) then
-                stats.insert_successes++;
-            fi
-        else
-            stats.remove_attempts++;
-            if fhsl_lf_remove(config.set, val) then
-                stats.remove_successes++;
-            fi
-        fi
+        switch bench with
+        xcase FHSL_LF:
+            for var i = 0; i < 100; ++i do
+                var action = fast_rand(&seed) % 100;
+                var val = fast_rand(&seed) % config.upper_bound;
+                if action < read_action then
+                    stats.read_attempts++;
+                    if fhsl_lf_contains(config.set, val) then
+                        stats.read_successes++;
+                    fi
+                elif action < add_action then
+                    stats.insert_attempts++;
+                    if fhsl_lf_add(&seed, config.set, val) then
+                        stats.insert_successes++;
+                    fi
+                else
+                    stats.remove_attempts++;
+                    if fhsl_lf_remove(config.set, val) then
+                        stats.remove_successes++;
+                    fi
+                fi
+            od
+        xcase _:
+            printf("error: unknown benchmark configuration.\n");
+            exit(1);
+        esac
     od
 
     // Store this thread's statistics in the per-thread-data.
