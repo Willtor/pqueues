@@ -221,7 +221,7 @@ begin
     var seed = cast(type u64, time(nil));
     var ptd = cast(type *per_thread_data_t, arg);
     var stats stats_t = { 0, 0, 0, 0, 0, 0 };
-    var config *config_t= ptd.config;
+    var config *config_t = ptd.config;
 
     printf("[started thread %d]\n", ptd.id);
     while ptd.state[0] == STATE_WAIT do
@@ -233,19 +233,24 @@ begin
     // TODO: Consider running for N operations before checking state again.
     // Why load when you could be hammering the data-structure?
     while ptd.state[0] == STATE_RUN do
-      var action = fast_rand(&seed) % 100;
-      var val = fast_rand(&seed) % config.upper_bound;
-      if action < read_action then
-        stats.read_attempts++;
-        // FIXME: These commented lines trigger a bug in the compiler.
-        //if fhsl_lf_contains(config.set, val) then stats.read_successes++; fi
-      elif action < add_action then
-        stats.insert_attempts++;
-        //if fhsl_lf_add(&seed, config.set, val) then stats.insert_successes++; fi
-      else
-        stats.remove_attempts++;
-        //if fhsl_lf_remove(config.set, val) then stats.remove_successes++; fi
-      fi
+        var action = fast_rand(&seed) % 100;
+        var val = fast_rand(&seed) % config.upper_bound;
+        if action < read_action then
+            stats.read_attempts++;
+            if fhsl_lf_contains(config.set, val) then
+                stats.read_successes++;
+            fi
+        elif action < add_action then
+            stats.insert_attempts++;
+            if fhsl_lf_add(&seed, config.set, val) then
+                stats.insert_successes++;
+            fi
+        else
+            stats.remove_attempts++;
+            if fhsl_lf_remove(config.set, val) then
+                stats.remove_successes++;
+            fi
+        fi
     od
 
     // Store this thread's statistics in the per-thread-data.
