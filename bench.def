@@ -238,8 +238,6 @@ begin
 
     var read_action = 100 - config.update_rate;
     var add_action = read_action + config.update_rate / 2;
-    // TODO: Consider running for N operations before checking state again.
-    // Why load when you could be hammering the data-structure?
     while ptd.state[0] == STATE_RUN do
         switch bench with
         xcase FHSL_LF:
