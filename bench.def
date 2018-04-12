@@ -233,7 +233,7 @@ begin
     // TODO: Consider running for N operations before checking state again.
     // Why load when you could be hammering the data-structure?
     while ptd.state[0] == STATE_RUN do
-      var action = fast_rand(&seed);
+      var action = fast_rand(&seed) % 100;
       var val = fast_rand(&seed) % config.upper_bound;
       if action < read_action then
         stats.read_attempts++;
