@@ -5,9 +5,11 @@ import "stdlib.h";
 
 // Set data structures:
 import "fhsl_lf.defi";
+import "fhsl_b.defi";
 
 typedef benchmark_t = enum
     | FHSL_LF
+    | FHSL_B
     ;
 
 typedef state_t = enum

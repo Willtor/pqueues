@@ -4,7 +4,9 @@ TARGET = pqueue_bench
 
 DEFFLAGS = -O3
 
-DATASTRUCTS = fhsl_lf.def
+DATASTRUCTS = \
+  fhsl_lf.def \
+  fhsl_b.def
 DEFIFILES = $(DATASTRUCTS:.def=.defi)
 SRC = $(DATASTRUCTS) bench.def
 OBJ = $(SRC:.def=.o)

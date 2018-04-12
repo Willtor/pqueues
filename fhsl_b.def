@@ -1,0 +1,221 @@
+// Copy of some of the EXCELLENT skiplist written before me
+
+typedef lock_t =
+  {
+    state volatile u64,
+    buf [56]char
+  };
+
+typedef node =
+  { val      u64,            // Value.
+    toplevel i32,
+    next     [20]*node,       // Follow-list of nodes.
+    marked bool,
+    fullylinked bool,
+    lock lock_t
+  };
+
+export opaque
+typedef fhsl_b =
+    { head  node,
+      tail  node
+    };
+
+/** Return a new fixed-height skip list.
+ */
+export
+def fhsl_b_create () -> *fhsl_b
+begin
+    var fhsl_b = new fhsl_b;
+    fhsl_b.head.val = 0;
+    fhsl_b.tail.val = -1U64;
+    for var i = 0; i < 20; ++i do
+        fhsl_b.head.next[i] = &fhsl_b.tail;
+        fhsl_b.tail.next[i] = nil;
+        fhsl_b.head.lock.state = 0;
+        fhsl_b.tail.lock.state = 0;
+    od
+    return fhsl_b;
+end
+
+/** Checks whether a node is present in the skiplist.
+ */
+export
+def fhsl_b_contains(set *fhsl_b, x u64) -> bool
+begin
+  var preds [20]*node;
+  var succs [20]*node;
+  var lfound = find(set, x, preds, succs);
+  return (lfound != -1 && succs[lfound].fullylinked && succs[lfound].marked == false);
+end
+
+/** Add a node, lock-free, to the skiplist.
+ */
+export
+def fhsl_b_add (seed *u64, set *fhsl_b, x u64) -> bool
+begin
+    var preds [20]*node;
+    var succs [20]*node;
+    var toplevel = random_level(seed, 20);
+    while true do
+      var lfound = find(set, x, preds, succs);
+      if lfound != -1 then
+        var nodefound volatile *node = succs[lfound];
+        if !nodefound.marked then
+          while !nodefound.fullylinked do
+            // Busy wait...
+          od
+          return false;
+        fi
+        continue;
+      fi
+      var pred * node = nil;
+      var succ * node = nil; 
+      var prevpred * node = nil;
+      var highestlocked i64 = -1;
+      var valid = true;
+      for var level = 0; valid && level <= toplevel; ++level do
+        pred = preds[level];
+        succ = succs[level];
+        if pred != prevpred then
+          take_lock(&pred.lock);
+          highestlocked = level;
+          prevpred = pred;
+        fi
+        valid = (!pred.marked && !succ.marked && pred.next[level] == succ);  
+      od
+      if !valid then
+        unlock(preds, highestlocked);
+        continue;
+      fi
+      var newnode = new node;
+      newnode.val = x;
+      newnode.toplevel = toplevel;
+      newnode.marked = false;
+      newnode.fullylinked = false;
+      for var level = 0; level <= toplevel; ++level do
+        newnode.next[level] = succs[level];
+        preds[level].next[level] = newnode;
+      od
+      newnode.fullylinked = true;
+      unlock(preds, highestlocked);
+      return true;
+    od
+end
+
+def remove(set * fhsl_b, key u64) -> bool
+begin
+  var nodetodelete volatile *node = nil;
+  var ismarked = false;
+  var toplevel i64 = -1;
+  var preds [20]*node;
+  var succs [20]*node;
+  while true do
+    var lfound = find(set, key, preds, succs);
+    if ismarked || (lfound > -1 && oktodelete(succs[lfound], lfound)) then
+      if !ismarked then
+        nodetodelete = succs[lfound];
+        take_lock(&nodetodelete.lock);
+        if nodetodelete.marked then
+          release_lock(&nodetodelete.lock);
+          return false;
+        fi
+        nodetodelete.marked = true;
+        
+      fi
+      var highestlocked = -1;
+      var pred * node = nil;
+      var succ * node = nil; 
+      var prevPred * node = nil;
+      var valid bool = true;
+      for var level = 0; valid && level <= toplevel; ++level do
+        pred = preds[level];
+        succ = succs[level];
+        if pred != prevPred then
+          take_lock(&pred.lock);
+          highestlocked = level;
+          prevPred = pred;
+        fi
+        valid = (!pred.marked && !succ.marked && pred.next[level] == succ);  
+      od
+      if !valid then
+        unlock(preds, highestlocked);
+        continue;
+      fi
+      for var level = 0; level <= toplevel; ++level do
+        preds[level].next[level] = nodetodelete.next[level];
+      od
+      release_lock(&nodetodelete.lock);
+      unlock(preds, highestlocked);
+      return true;
+    else return false; fi
+  od
+end
+
+def find (set *fhsl_b,
+          key u64,
+          preds [20]*node,
+          succs [20]*node) -> i64
+begin
+    var lfound i64 = -1;
+    var pred = &set.head;
+    for var level = 20; level >= 0; --level do
+        var curr volatile *node = pred.next[level];
+        while key > curr.val do
+            pred = curr;
+            curr = pred.next[level];
+        od
+        if lfound == -1 && key == curr.val then
+            lfound = level;
+        fi
+        preds[level] = pred;
+        succs[level] = curr;
+    od
+    return lfound;
+end
+
+def unlock(nodes [20]*node, highest u64) -> void
+begin
+  for var level = 0; level <= highest; ++level do
+    release_lock(&nodes[level].lock);
+  od
+end
+
+def oktodelete(candidate *node, lfound i64) -> bool
+begin
+  return (candidate.fullylinked && candidate.toplevel == lfound && candidate.marked == false);
+end
+
+def fast_rand (seed *u64) -> u64
+begin
+    if seed[0] == 0 then seed[0] = 1; fi
+    seed[0] *= 0xFFFFFFFFFFFFFFC5U64;
+    return seed[0];
+end
+
+def take_lock(lock *lock_t) -> void
+begin
+  while true do
+    if lock.state == 0U64 then
+      if __builtin_swap(&lock.state, 1U64) == 0U64 then
+        return;
+      fi
+    fi
+  od
+end
+
+def release_lock(lock *lock_t) -> void
+begin
+  lock.state = 0;
+end
+
+def random_level (seed *u64, max u32) -> u32
+begin
+    var level = 1;
+    while fast_rand(seed) %2 == 0 && level < max do
+        ++level;
+    od
+    return level - 1;
+end
+
+
