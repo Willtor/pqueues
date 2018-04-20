@@ -51,7 +51,7 @@ end
 /** Return whether the skip list contains the value.
  */
 export
-def fhsl_lf_contains (set *fhsl_lf, x u64) -> bool
+def fhsl_lf_contains (set *fhsl_lf, x i64) -> bool
 begin
     // FIXME: Nir's book does this differently.  Figure out whether this
     // still works and maybe replace.

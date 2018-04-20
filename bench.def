@@ -226,7 +226,7 @@ end
 def thread (arg *void) -> *void
 begin
     var seed = cast(type u64, time(nil));
-    var ptd = cast(type *per_thread_data_t, arg);
+    var ptd = cast(type volatile *per_thread_data_t, arg);
     var stats stats_t = { 0, 0, 0, 0, 0, 0 };
     var config *config_t = ptd.config;
     var bench = config.benchmark;
@@ -235,32 +235,46 @@ begin
     while ptd.state[0] == STATE_WAIT do
         // busy-wait.
     od
-
     var read_action = 100 - config.update_rate;
-    var add_action = read_action + config.update_rate / 2;
+    var add_action = read_action + (config.update_rate / 2);
     while ptd.state[0] == STATE_RUN do
+        var action = fast_rand(&seed) % 100;
+        var val = cast(type i64, fast_rand(&seed) % config.upper_bound);
         switch bench with
         xcase FHSL_LF:
-            for var i = 0; i < 100; ++i do
-                var action = fast_rand(&seed) % 100;
-                var val = fast_rand(&seed) % config.upper_bound;
-                if action < read_action then
-                    stats.read_attempts++;
-                    if fhsl_lf_contains(config.set, val) then
-                        stats.read_successes++;
-                    fi
-                elif action < add_action then
-                    stats.insert_attempts++;
-                    if fhsl_lf_add(&seed, config.set, val) then
-                        stats.insert_successes++;
-                    fi
-                else
-                    stats.remove_attempts++;
-                    if fhsl_lf_remove(config.set, val) then
-                        stats.remove_successes++;
-                    fi
+            if action < read_action then
+                stats.read_attempts++;
+                if fhsl_lf_contains(config.set, val) then
+                    stats.read_successes++;
                 fi
-            od
+            elif action < add_action then
+                stats.insert_attempts++;
+                if fhsl_lf_add(&seed, config.set, val) then
+                    stats.insert_successes++;
+                fi
+            else
+                stats.remove_attempts++;
+                if fhsl_lf_remove(config.set, val) then
+                    stats.remove_successes++;
+                fi
+            fi
+        xcase FHSL_B:
+            if action < read_action then
+                stats.read_attempts++;
+                if fhsl_b_contains(config.set, val) then
+                    stats.read_successes++;
+                fi
+            elif action < add_action then
+                stats.insert_attempts++;
+                if fhsl_b_add(&seed, config.set, val) then
+                    stats.insert_successes++;
+                fi
+            else
+                stats.remove_attempts++;
+                if fhsl_b_remove(config.set, val) then
+                    stats.remove_successes++;
+                fi
+            fi
         xcase _:
             printf("error: unknown benchmark configuration.\n");
             exit(1);
@@ -278,12 +292,22 @@ begin
     xcase FHSL_LF:
         var set = fhsl_lf_create();
         for var i = 0; i < config.init_size; ++i do
-            var val = fast_rand(seed);
-            if false == fhsl_lf_add(seed, set, val % config.upper_bound) then
+            var val = cast(type i64, fast_rand(seed) % config.upper_bound);
+            if false == fhsl_lf_add(seed, set, val) then
                 --i;
             fi
         od
         config.set = set;
+    xcase FHSL_B:
+        // Change var indentier to "set" to find a bug.
+        var my_set *fhsl_b = fhsl_b_create();
+        for var i = 0; i < config.init_size; ++i do
+            var val = cast(type i64, fast_rand(seed)  % config.upper_bound);
+            if false == fhsl_b_add(seed, my_set, val) then
+                --i;
+            fi
+        od
+        config.set = cast(type *void, my_set);
     xcase _:
         printf("error: unable to initialize unknown set.\n");
         exit(1);

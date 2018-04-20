@@ -3,6 +3,7 @@ DEFGHI = defghi
 TARGET = pqueue_bench
 
 DEFFLAGS = -O3
+DEFLIBS = -lpthread
 
 DATASTRUCTS = \
   fhsl_lf.def \
@@ -14,7 +15,7 @@ OBJ = $(SRC:.def=.o)
 all: $(TARGET)
 
 $(TARGET): $(SRC:.def=.o)
-	$(DEF) -o $@ $(DEFFLAGS) $^
+	$(DEF) -o $@ $(DEFFLAGS) $(DEFLIBS) $^
 
 clean:
 	rm -f $(TARGET) *.defi *.o
