@@ -6,7 +6,7 @@
 import "pthread.h";
 
 typedef node =
-  { val      i64,            // Value.
+  { val      u64,            // Value.
     topLevel i32,
     next     [20]*node,       // Follow-list of nodes.
     marked bool,
@@ -40,12 +40,12 @@ end
 /** Checks whether a node, wait-free, is present in the skiplist.
  */
 export
-def fhsl_b_contains(set *fhsl_b, x i64) -> bool
+def fhsl_b_contains(set *fhsl_b, x u64) -> bool
 begin
   var preds [20]*node;
   var succs [20]*node;
   var lFound = find(set, x, preds, succs);
-  if lFound == -1I64 then
+  if lFound == -1I32 then
     return false;
   fi
   return (succs[lFound].fullylinked == true && succs[lFound].marked == false);
@@ -54,7 +54,7 @@ end
 /** Add a node, blocking, to the skiplist.
  */
 export
-def fhsl_b_add (seed *u64, set *fhsl_b, x i64) -> bool
+def fhsl_b_add (seed *u64, set *fhsl_b, x u64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -72,7 +72,7 @@ begin
         continue;
       fi
       var pred, succ, prevPred * node = nil, nil, nil;
-      var highestlocked i64 = -1;
+      var highestlocked i32 = -1;
       var valid = true;
       for var level = 0; valid && level <= topLevel; ++level do
         pred = preds[level];
@@ -107,11 +107,11 @@ end
 /** Remove a node, blocking, from the skiplist.
  */
 export
-def fhsl_b_remove(set * fhsl_b, key i64) -> bool
+def fhsl_b_remove(set * fhsl_b, key u64) -> bool
 begin
   var nodeToDelete volatile *node = nil;
   var isMarked = false;
-  var topLevel i64 = -1;
+  var topLevel i32 = -1;
   var preds [20]*node;
   var succs [20]*node;
   while true do
@@ -156,7 +156,7 @@ begin
 end
 
 def find (set *fhsl_b,
-          key i64,
+          key u64,
           preds [20]*node,
           succs [20]*node) -> i64
 begin
@@ -177,14 +177,14 @@ begin
     return lFound;
 end
 
-def unlock_nodes(nodes [20]*node, highest i64) -> void
+def unlock_nodes(nodes [20]*node, highest i32) -> void
 begin
   for var level = 0; level <= highest; ++level do
     pthread_spin_unlock(&nodes[level].lock);
   od
 end
 
-def ok_to_delete(candidate *node, lFound i64) -> bool
+def ok_to_delete(candidate *node, lFound i32) -> bool
 begin
   return (candidate.fullylinked && candidate.topLevel == lFound && !candidate.marked);
 end

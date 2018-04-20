@@ -5,7 +5,7 @@
 import "stdio.h";
 
 typedef node =
-    { val      i64,            // Value.
+    { val      u64,            // Value.
       toplevel i32,            // Height.
       next     [20]*node       // Follow-list of nodes.
     };
@@ -51,7 +51,7 @@ end
 /** Return whether the skip list contains the value.
  */
 export
-def fhsl_lf_contains (set *fhsl_lf, x i64) -> bool
+def fhsl_lf_contains (set *fhsl_lf, x u64) -> bool
 begin
     // FIXME: Nir's book does this differently.  Figure out whether this
     // still works and maybe replace.
@@ -73,7 +73,7 @@ end
 /** Add a node, lock-free, to the skiplist.
  */
 export
-def fhsl_lf_add (seed *u64, set *fhsl_lf, x i64) -> bool
+def fhsl_lf_add (seed *u64, set *fhsl_lf, x u64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -111,7 +111,7 @@ end
 /** Remove a node, lock-free, from the skiplist.
  */
 export
-def fhsl_lf_remove (set *fhsl_lf, x i64) -> bool
+def fhsl_lf_remove (set *fhsl_lf, x u64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -176,7 +176,7 @@ begin
 end
 
 def find (set *fhsl_lf,
-          key i64,
+          key u64,
           preds [20]*node,
           succs [20]*node) -> bool
 begin

@@ -239,7 +239,7 @@ begin
     var add_action = read_action + (config.update_rate / 2);
     while ptd.state[0] == STATE_RUN do
         var action = fast_rand(&seed) % 100;
-        var val = cast(type i64, fast_rand(&seed) % config.upper_bound);
+        var val = fast_rand(&seed) % config.upper_bound;
         switch bench with
         xcase FHSL_LF:
             if action < read_action then
@@ -292,7 +292,7 @@ begin
     xcase FHSL_LF:
         var set = fhsl_lf_create();
         for var i = 0; i < config.init_size; ++i do
-            var val = cast(type i64, fast_rand(seed) % config.upper_bound);
+            var val = fast_rand(seed) % config.upper_bound;
             if false == fhsl_lf_add(seed, set, val) then
                 --i;
             fi
@@ -302,7 +302,7 @@ begin
         // Change var indentier to "set" to find a bug.
         var my_set *fhsl_b = fhsl_b_create();
         for var i = 0; i < config.init_size; ++i do
-            var val = cast(type i64, fast_rand(seed)  % config.upper_bound);
+            var val = fast_rand(seed) % config.upper_bound;
             if false == fhsl_b_add(seed, my_set, val) then
                 --i;
             fi
