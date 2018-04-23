@@ -7,6 +7,7 @@ import "stdlib.h";
 // Set data structures:
 import "fhsl_lf.defi";
 import "fhsl_b.defi";
+import "stacktrack/skip-list.h";
 
 typedef benchmark_t = enum
     | FHSL_LF
