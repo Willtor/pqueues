@@ -2,19 +2,28 @@ DEF = def
 DEFGHI = defghi
 TARGET = pqueue_bench
 
-DEFFLAGS = -O3
+OPTLEVEL = -O3
+
+DEFFLAGS = $(OPTLEVEL)
 DEFLIBS = -lpthread
+
+CC = clang
+CFLAGS = $(OPTLEVEL) -mrtm
 
 DATASTRUCTS = \
   fhsl_lf.def \
   fhsl_b.def
 DEFIFILES = $(DATASTRUCTS:.def=.defi)
-SRC = $(DATASTRUCTS) bench.def
-OBJ = $(SRC:.def=.o)
+
+STACKTRACK = atomics.c common.c htm.c skip-list.c stack-track.c
+
+SRC = $(DATASTRUCTS) $(STACKTRACK) bench.def
+OBJ1 = $(SRC:.def=.o)
+OBJ = $(OBJ1:.c=.o)
 
 all: $(TARGET)
 
-$(TARGET): $(SRC:.def=.o)
+$(TARGET): $(OBJ)
 	$(DEF) -o $@ $(DEFFLAGS) $(DEFLIBS) $^
 
 clean:
@@ -24,6 +33,9 @@ bench.o: $(DEFIFILES)
 
 %.o: %.def
 	$(DEF) -o $@ $(DEFFLAGS) -c $<
+
+%.o: stacktrack/%.c
+	$(CC) -o $@ $(CFLAGS) -c $<
 
 %.defi: %.def
 	$(DEFGHI) $<
