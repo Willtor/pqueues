@@ -13,6 +13,11 @@ typedef benchmark_t = enum
     | FHSL_B
     ;
 
+typedef memory_policy_t = enum
+    | POLICY_LEAKY
+    | POLICY_RETIRE
+    ;
+
 typedef state_t = enum
     | STATE_WAIT
     | STATE_RUN
@@ -22,6 +27,7 @@ typedef state_t = enum
 typedef config_t =
     {
         benchmark      benchmark_t,
+        policy         memory_policy_t,
         duration_s     i32,
         thread_count   i32,
         init_size      i64,
@@ -71,6 +77,16 @@ begin
     return "FIXME: need reachability detection after a switch.";
 end
 
+def string_of_policy (p memory_policy_t) -> *char
+begin
+    switch p with
+    xcase POLICY_LEAKY: return "leaky";
+    xcase POLICY_RETIRE: return "retire";
+    xcase _: return "unknown policy";
+    esac
+    return "FIXME: need reachability detection after a switch.";
+end
+
 def help (bench *char) -> void
 begin
     printf("Usage: %s [OPTIONS]\n", bench);
@@ -80,6 +96,9 @@ begin
     printf("  -b <benchmark>: Set the benchmark. (default = fhsl_lf)\n");
     printf("     * fhsl_lf: Fixed-height skip list; lock-free.\n");
     printf("     * fhsl_b: Fixed-height skip list; blocking.\n");
+    printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
+    printf("     * leaky: Leak removed nodes.\n");
+    printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
     printf("  -i <n>: Initial set size. (default = 256)\n");
     printf("  -r <n>: Range upper bound [0-n). (default = 512)\n");
     printf("  -u <n>: Percent of ops that are updates. (default = 10)\n");
@@ -117,7 +136,7 @@ end
 def read_args (argc i32, argv **char) -> config_t
 begin
     var config config_t =
-        { FHSL_LF, 1, 1, 256, 512, 10, nil };
+        { FHSL_LF, POLICY_LEAKY, 1, 1, 256, 512, 10, nil };
 
     for var i = 1; i < argc; ++i do
         switch argv[i] with
@@ -149,6 +168,21 @@ begin
             xcase "fhsl_b": config.benchmark = FHSL_B;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
+                exit(1);
+            esac
+        xcase "-p":
+            ++i;
+            if i >= argc then
+                fprintf(stderr, "error: -b requires an argument.\n");
+                exit(1);
+            fi
+            switch argv[i] with
+            xcase "leaky": config.policy = POLICY_LEAKY;
+            xcase "retire":
+            ocase "forkscan":
+                config.policy = POLICY_RETIRE;
+            xcase _:
+                printf("unknown memory policy: %s\n", argv[i]);
                 exit(1);
             esac
         xcase "-i":
@@ -183,11 +217,31 @@ begin
     return config;
 end
 
+def verify_config (config *config_t) -> void
+begin
+    // Be sure the configuration is valid -- i.e., does the given data
+    // structure support the requested memory policy, etc.?
+
+    switch { config.benchmark, config.policy } with
+    xcase { FHSL_LF, POLICY_LEAKY }:
+    ocase { FHSL_LF, POLICY_RETIRE }:
+    ocase { FHSL_B, POLICY_LEAKY }:
+    xcase _:
+        printf("Unsupported configuration:\n");
+        printf("  benchmark: %s\n  policy: %s\n",
+               string_of_benchmark(config.benchmark),
+               string_of_policy(config.policy));
+        printf("No implementation for this combination.\n");
+        exit(1);
+    esac
+end
+
 def print_config (config *config_t) -> void
 begin
     printf("Benchmark configuration\n");
     printf("--------- -------------\n");
     printf("  benchmark    : %s\n", string_of_benchmark(config.benchmark));
+    printf("  mem_policy   : %s\n", string_of_policy(config.policy));
     printf("  duration (s) : %d\n", config.duration_s);
     printf("  thread count : %d\n", config.thread_count);
     printf("  initial size : %lld\n", config.init_size);
@@ -230,6 +284,7 @@ begin
     var stats stats_t = { 0, 0, 0, 0, 0, 0 };
     var config *config_t = ptd.config;
     var bench = config.benchmark;
+    var policy = config.policy;
 
     printf("[started thread %d]\n", ptd.id);
     while ptd.state[0] == STATE_WAIT do
@@ -254,8 +309,15 @@ begin
                 fi
             else
                 stats.remove_attempts++;
-                if fhsl_lf_remove(config.set, val) then
-                    stats.remove_successes++;
+                if policy == POLICY_LEAKY then
+                    if fhsl_lf_leaky_remove(config.set, val) then
+                        stats.remove_successes++;
+                    fi
+                else
+                    // policy = POLICY_RETIRE
+                    if fhsl_lf_remove(config.set, val) then
+                        stats.remove_successes++;
+                    fi
                 fi
             fi
         xcase FHSL_B:
@@ -320,6 +382,7 @@ begin
     var config = read_args(argc, argv);
     var seed = cast(type u64, time(nil));
     var state = STATE_WAIT;
+    verify_config(&config);
     print_config(&config);
 
     printf("Initializing set.\n");
