@@ -239,7 +239,7 @@ begin
     var add_action = read_action + (config.update_rate / 2);
     while ptd.state[0] == STATE_RUN do
         var action = fast_rand(&seed) % 100;
-        var val = fast_rand(&seed) % config.upper_bound;
+        var val i64 = fast_rand(&seed) % config.upper_bound;
         switch bench with
         xcase FHSL_LF:
             if action < read_action then

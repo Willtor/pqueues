@@ -6,7 +6,7 @@
 import "pthread.h";
 
 typedef node =
-  { val      u64,            // Value.
+  { val      i64,            // Value.
     topLevel i32,
     next     [20]*node,       // Follow-list of nodes.
     marked bool,
@@ -40,7 +40,7 @@ end
 /** Checks whether a node, wait-free, is present in the skiplist.
  */
 export
-def fhsl_b_contains(set *fhsl_b, x u64) -> bool
+def fhsl_b_contains(set *fhsl_b, x i64) -> bool
 begin
   var preds [20]*node;
   var succs [20]*node;
@@ -54,7 +54,7 @@ end
 /** Add a node, blocking, to the skiplist.
  */
 export
-def fhsl_b_add (seed *u64, set *fhsl_b, x u64) -> bool
+def fhsl_b_add (seed *u64, set *fhsl_b, x i64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -107,7 +107,7 @@ end
 /** Remove a node, blocking, from the skiplist.
  */
 export
-def fhsl_b_remove(set * fhsl_b, key u64) -> bool
+def fhsl_b_remove(set * fhsl_b, key i64) -> bool
 begin
   var nodeToDelete volatile *node = nil;
   var isMarked = false;
@@ -156,7 +156,7 @@ begin
 end
 
 def find (set *fhsl_b,
-          key u64,
+          key i64,
           preds [20]*node,
           succs [20]*node) -> i64
 begin

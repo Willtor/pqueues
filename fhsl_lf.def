@@ -5,7 +5,7 @@
 import "stdio.h";
 
 typedef node =
-    { val      u64,            // Value.
+    { val      i64,            // Value.
       toplevel i32,            // Height.
       next     [20]*node       // Follow-list of nodes.
     };
@@ -51,7 +51,7 @@ end
 /** Return whether the skip list contains the value.
  */
 export
-def fhsl_lf_contains (set *fhsl_lf, x u64) -> bool
+def fhsl_lf_contains (set *fhsl_lf, x i64) -> bool
 begin
     // FIXME: Nir's book does this differently.  Figure out whether this
     // still works and maybe replace.
@@ -73,7 +73,7 @@ end
 /** Add a node, lock-free, to the skiplist.
  */
 export
-def fhsl_lf_add (seed *u64, set *fhsl_lf, x u64) -> bool
+def fhsl_lf_add (seed *u64, set *fhsl_lf, x i64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -111,7 +111,7 @@ end
 /** Remove a node, lock-free, from the skiplist.
  */
 export
-def fhsl_lf_remove (set *fhsl_lf, x u64) -> bool
+def fhsl_lf_remove (set *fhsl_lf, x i64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -153,6 +153,52 @@ begin
     od
 end
 
+/** Remove a node, lock-free, from the skiplist.  Leak the memory.
+ */
+export
+def fhsl_lf_leaky_remove (set *fhsl_lf, x i64) -> bool
+begin
+    var preds [20]*node;
+    var succs [20]*node;
+    var succ *node;
+    while true do
+        if false == find(set, x, preds, succs) then
+            return false;
+        else
+            var node_to_remove = succs[0];
+            var marked bool;
+            for var level = node_to_remove.toplevel;
+                level >= 1;
+                --level
+            do
+                succ = node_to_remove.next[level];
+                marked = is_marked(succ);
+                while !marked do
+                    __builtin_cas(&node_to_remove.next[level], unmark(succ),
+                                  mark(succ));
+                    succ = node_to_remove.next[level];
+                    marked = is_marked(succ);
+                od
+            od
+            succ = node_to_remove.next[0];
+            retire node_to_remove;
+            marked = is_marked(succ);
+            while true do
+                var i_marked_it = __builtin_cas(&node_to_remove.next[0],
+                                                unmark(succ), mark(succ));
+                succ = succs[0].next[0];
+                marked = is_marked(succ);
+                if i_marked_it then
+                    find(set, x, preds, succs);
+                    return true;
+                elif marked then
+                    return false;
+                fi
+            od
+        fi
+    od
+end
+
 def fast_rand (seed *u64) -> u64
 begin
     var val = seed[0];
@@ -176,7 +222,7 @@ begin
 end
 
 def find (set *fhsl_lf,
-          key u64,
+          key i64,
           preds [20]*node,
           succs [20]*node) -> bool
 begin
