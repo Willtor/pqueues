@@ -1,4 +1,5 @@
 import "forkscan.defi";
+import "malloc.h";
 import "pthread.h";
 import "stdio.h";
 import "time.h";
@@ -383,6 +384,9 @@ begin
     var config = read_args(argc, argv);
     var seed = cast(type u64, time(nil));
     var state = STATE_WAIT;
+
+    //forkscan_set_allocator(malloc, free, malloc_usable_size);
+
     verify_config(&config);
     print_config(&config);
 

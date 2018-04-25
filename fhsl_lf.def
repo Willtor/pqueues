@@ -136,7 +136,6 @@ begin
                 od
             od
             succ = node_to_remove.next[0];
-            retire node_to_remove;
             marked = is_marked(succ);
             while true do
                 var i_marked_it = __builtin_cas(&node_to_remove.next[0],
@@ -144,6 +143,7 @@ begin
                 succ = succs[0].next[0];
                 marked = is_marked(succ);
                 if i_marked_it then
+                    retire succs[0];
                     find(set, x, preds, succs);
                     return true;
                 elif marked then

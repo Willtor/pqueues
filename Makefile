@@ -1,4 +1,4 @@
-DEF = def
+DEF ?= def
 DEFGHI = defghi
 TARGET = pqueue_bench
 
