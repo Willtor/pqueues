@@ -13,6 +13,7 @@ import "stacktrack/skip-list.h";
 typedef benchmark_t = enum
     | FHSL_LF
     | FHSL_B
+    | STACKTRACK
     ;
 
 typedef memory_policy_t = enum
@@ -74,6 +75,7 @@ begin
     switch b with
     xcase FHSL_LF: return "fhsl_lf";
     xcase FHSL_B: return "fhsl_b";
+    xcase STACKTRACK: return "stacktrack";
     xcase _: return "unknown benchmark";
     esac
     return "FIXME: need reachability detection after a switch.";
@@ -98,6 +100,7 @@ begin
     printf("  -b <benchmark>: Set the benchmark. (default = fhsl_lf)\n");
     printf("     * fhsl_lf: Fixed-height skip list; lock-free.\n");
     printf("     * fhsl_b: Fixed-height skip list; blocking.\n");
+    printf("     * stacktrack: Use the StackTrack skiplist written in C.\n");
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
@@ -168,6 +171,7 @@ begin
             switch argv[i] with
             xcase "fhsl_lf": config.benchmark = FHSL_LF;
             xcase "fhsl_b": config.benchmark = FHSL_B;
+            xcase "stacktrack": config.benchmark = STACKTRACK;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
                 exit(1);
@@ -228,6 +232,7 @@ begin
     xcase { FHSL_LF, POLICY_LEAKY }:
     ocase { FHSL_LF, POLICY_RETIRE }:
     ocase { FHSL_B, POLICY_LEAKY }:
+    ocase { STACKTRACK, POLICY_LEAKY }:
     xcase _:
         printf("Unsupported configuration:\n");
         printf("  benchmark: %s\n  policy: %s\n",
@@ -287,6 +292,13 @@ begin
     var config *config_t = ptd.config;
     var bench = config.benchmark;
     var policy = config.policy;
+    var set = config.set;
+
+    // StackTrack, since it was originally part of a different benchmark, does
+    // things differently.  We aim to please.
+    var st_thread = new st_thread_t;
+    var st_seed = cast(type i32, seed);
+    ST_thread_init(st_thread, &st_seed, 50, 100);
 
     printf("[started thread %d]\n", ptd.id);
     while ptd.state[0] == STATE_WAIT do
@@ -298,52 +310,106 @@ begin
         var action = fast_rand(&seed) % 100;
         var val i64 = fast_rand(&seed) % config.upper_bound;
         switch bench with
+
+/***************************************************************************/
+/*                    fixed-height skip list, lock free                    */
+/***************************************************************************/
+
         xcase FHSL_LF:
             if action < read_action then
                 stats.read_attempts++;
-                if fhsl_lf_contains(config.set, val) then
+                if fhsl_lf_contains(set, val) then
                     stats.read_successes++;
                 fi
             elif action < add_action then
                 stats.insert_attempts++;
-                if fhsl_lf_add(&seed, config.set, val) then
+                if fhsl_lf_add(&seed, set, val) then
                     stats.insert_successes++;
                 fi
             else
                 stats.remove_attempts++;
                 if policy == POLICY_LEAKY then
-                    if fhsl_lf_leaky_remove(config.set, val) then
+                    if fhsl_lf_leaky_remove(set, val) then
                         stats.remove_successes++;
                     fi
                 else
                     // policy = POLICY_RETIRE
-                    if fhsl_lf_remove(config.set, val) then
+                    if fhsl_lf_remove(set, val) then
                         stats.remove_successes++;
                     fi
                 fi
             fi
+
+/***************************************************************************/
+/*                     fixed-height skip list, blocking                    */
+/***************************************************************************/
+
         xcase FHSL_B:
             if action < read_action then
                 stats.read_attempts++;
-                if fhsl_b_contains(config.set, val) then
+                if fhsl_b_contains(set, val) then
                     stats.read_successes++;
                 fi
             elif action < add_action then
                 stats.insert_attempts++;
-                if fhsl_b_add(&seed, config.set, val) then
+                if fhsl_b_add(&seed, set, val) then
                     stats.insert_successes++;
                 fi
             else
                 stats.remove_attempts++;
-                if fhsl_b_remove(config.set, val) then
+                if fhsl_b_remove(set, val) then
                     stats.remove_successes++;
                 fi
+            fi
+
+/***************************************************************************/
+/*                    StackTrack fixed-height, blocking                    */
+/***************************************************************************/
+
+        xcase STACKTRACK:
+            if action < read_action then
+                stats.read_attempts++;
+                switch policy with
+                xcase POLICY_LEAKY:
+                    if 0 != skiplist_contains_pure(st_thread, set, val) then
+                        stats.read_successes++;
+                    fi
+                xcase _:
+                    printf("error: unsupported mem policy for benchmark.\n");
+                    exit(1);
+                esac
+            elif action < add_action then
+                stats.insert_attempts++;
+                switch policy with
+                xcase POLICY_LEAKY:
+                    if nil != skiplist_insert_pure(st_thread, set, val) then
+                        stats.insert_successes++;
+                    fi
+                xcase _:
+                    printf("error: unsupported mem policy for benchmark.\n");
+                    exit(1);
+                esac
+            else
+                stats.remove_attempts++;
+                switch policy with
+                xcase POLICY_LEAKY:
+                    if 0 != skiplist_remove_pure(st_thread, set, val) then
+                        stats.remove_successes++;
+                    fi
+                xcase _:
+                    printf("error: unsupported mem policy for benchmark.\n");
+                    exit(1);
+                esac
             fi
         xcase _:
             printf("error: unknown benchmark configuration.\n");
             exit(1);
         esac
     od
+
+    // Cleanup StackTrack.
+    ST_thread_finish(st_thread);
+    delete st_thread;
 
     // Store this thread's statistics in the per-thread-data.
     ptd.stats = stats;
@@ -370,6 +436,26 @@ begin
                 --i;
             fi
         od
+        config.set = cast(type *void, set);
+    xcase STACKTRACK:
+        var set = skiplist_init();
+        var st_thread = new st_thread_t;
+        var local_seed = cast(type i32, seed[0]);
+        ST_thread_init(st_thread, &local_seed, 50, 100);
+        for var i = 0; i < config.init_size; ++i do
+            var val = fast_rand(seed) % config.upper_bound;
+            switch config.policy with
+            xcase POLICY_LEAKY:
+                if nil == skiplist_insert_pure(st_thread, set, val) then
+                    --i;
+                fi
+            xcase _:
+                printf("error: unsupported mem policy for stacktrack.");
+                exit(1);
+            esac
+        od
+        ST_thread_finish(st_thread);
+        delete st_thread;
         config.set = cast(type *void, set);
     xcase _:
         printf("error: unable to initialize unknown set.\n");
