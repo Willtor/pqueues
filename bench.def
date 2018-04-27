@@ -233,6 +233,7 @@ begin
     ocase { FHSL_LF, POLICY_RETIRE }:
     ocase { FHSL_B, POLICY_LEAKY }:
     ocase { STACKTRACK, POLICY_LEAKY }:
+    ocase { STACKTRACK, POLICY_RETIRE }:
     xcase _:
         printf("Unsupported configuration:\n");
         printf("  benchmark: %s\n  policy: %s\n",
@@ -374,6 +375,11 @@ begin
                     if 0 != skiplist_contains_pure(st_thread, set, val) then
                         stats.read_successes++;
                     fi
+                xcase POLICY_RETIRE:
+                    if 0 != skiplist_contains_forkscan(st_thread, set, val)
+                    then
+                        stats.read_successes++;
+                    fi
                 xcase _:
                     printf("error: unsupported mem policy for benchmark.\n");
                     exit(1);
@@ -385,6 +391,11 @@ begin
                     if nil != skiplist_insert_pure(st_thread, set, val) then
                         stats.insert_successes++;
                     fi
+                xcase POLICY_RETIRE:
+                    if nil != skiplist_insert_forkscan(st_thread, set, val)
+                    then
+                        stats.insert_successes++;
+                    fi
                 xcase _:
                     printf("error: unsupported mem policy for benchmark.\n");
                     exit(1);
@@ -394,6 +405,10 @@ begin
                 switch policy with
                 xcase POLICY_LEAKY:
                     if 0 != skiplist_remove_pure(st_thread, set, val) then
+                        stats.remove_successes++;
+                    fi
+                xcase POLICY_RETIRE:
+                    if 0 != skiplist_remove_forkscan(st_thread, set, val) then
                         stats.remove_successes++;
                     fi
                 xcase _:
@@ -446,6 +461,7 @@ begin
             var val = fast_rand(seed) % config.upper_bound;
             switch config.policy with
             xcase POLICY_LEAKY:
+            ocase POLICY_RETIRE:
                 if nil == skiplist_insert_pure(st_thread, set, val) then
                     --i;
                 fi
