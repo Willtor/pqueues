@@ -461,8 +461,11 @@ begin
             var val = fast_rand(seed) % config.upper_bound;
             switch config.policy with
             xcase POLICY_LEAKY:
-            ocase POLICY_RETIRE:
                 if nil == skiplist_insert_pure(st_thread, set, val) then
+                    --i;
+                fi
+            xcase POLICY_RETIRE:
+                if nil == skiplist_insert_forkscan(st_thread, set, val) then
                     --i;
                 fi
             xcase _:
