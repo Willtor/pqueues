@@ -33,6 +33,7 @@ typedef config_t =
     {
         benchmark      benchmark_t,
         policy         memory_policy_t,
+        csv            bool,
         duration_s     i32,
         thread_count   i32,
         init_size      i64,
@@ -128,6 +129,7 @@ begin
     printf("  -i <n>: Initial set size. (default = 256)\n");
     printf("  -r <n>: Range upper bound [0-n). (default = 512)\n");
     printf("  -u <n>: Percent of ops that are updates. (default = 10)\n");
+    printf("  --csv: Generate a comma-separated value summary.\n");
     exit(127);
 end
 
@@ -162,7 +164,7 @@ end
 def read_args (argc i32, argv **char) -> config_t
 begin
     var config config_t =
-        { FHSL_LF, POLICY_LEAKY, 1, 1, 256, 512, 10, nil };
+        { FHSL_LF, POLICY_LEAKY, false, 1, 1, 256, 512, 10, nil };
 
     for var i = 1; i < argc; ++i do
         switch argv[i] with
@@ -237,6 +239,8 @@ begin
                 exit(1);
             fi
             config.update_rate = read_i32(0, 100, argv[i], "-u");
+        xcase "--csv":
+            config.csv = true;
         xcase _:
             printf("unknown option: %s\n", argv[i]);
             exit(1);
@@ -315,6 +319,24 @@ begin
 
     printf("  total-operations   : %lld\n", total_ops);
     printf("  ops-per-second     : %lld\n",
+           cast(type i64, total_ops / runtime));
+end
+
+def print_csv (config *config_t, stats *stats_t, runtime f64) -> void
+begin
+    puts("# fields: name, benchmark, policy, threads, init_size, upper_bound, update_rate, ops/sec");
+
+    var total_ops = stats.read_successes
+        + stats.insert_successes
+        + stats.remove_successes;
+
+    printf("pqueue_bench, %s, %s, %d, %lld, %lld, %d, %lld\n",
+           string_of_benchmark(config.benchmark),
+           string_of_policy(config.policy),
+           config.thread_count,
+           config.init_size,
+           config.upper_bound,
+           config.update_rate,
            cast(type i64, total_ops / runtime));
 end
 
@@ -620,6 +642,7 @@ begin
 
     printf("total statistics:\n");
     print_stats(&totals, runtime);
+    if config.csv then print_csv(&config, &totals, runtime); fi
 
     delete tids;
     delete ptds;
