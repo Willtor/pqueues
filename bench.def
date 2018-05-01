@@ -259,6 +259,7 @@ begin
     xcase { FHSL_LF, POLICY_LEAKY }:
     ocase { FHSL_LF, POLICY_RETIRE }:
     ocase { FHSL_B, POLICY_LEAKY }:
+    ocase { FHSL_B, POLICY_RETIRE }:
     ocase { STACKTRACK, POLICY_LEAKY }:
     ocase { STACKTRACK, POLICY_RETIRE }:
     ocase { STACKTRACK, POLICY_HAZARD }:
@@ -413,8 +414,15 @@ begin
                 fi
             else
                 stats.remove_attempts++;
-                if fhsl_b_remove(set, val) then
-                    stats.remove_successes++;
+                if policy == POLICY_LEAKY then
+                    if fhsl_b_leaky_remove(config.set, val) then
+                        stats.remove_successes++;
+                    fi
+                else
+                    // policy = POLICY_RETIRE
+                    if fhsl_b_remove(config.set, val) then
+                        stats.remove_successes++;
+                    fi
                 fi
             fi
 

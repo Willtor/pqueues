@@ -14,6 +14,18 @@ typedef node =
     lock pthread_spinlock_t
   };
 
+/** Returns a new node for fixed-height skip list.
+ */
+def node_create(val i64, topLevel i32) -> *node
+begin
+  var newNode = new node;
+  newNode.val = val;
+  newNode.topLevel = topLevel;
+  newNode.marked = false;
+  newNode.fullylinked = false;
+  return newNode;
+end
+
 export opaque
 typedef fhsl_b =
     { head  node,
@@ -88,11 +100,7 @@ begin
         unlock_nodes(preds, highestlocked);
         continue;
       fi
-      var newnode = new node;
-      newnode.val = x;
-      newnode.topLevel = topLevel;
-      newnode.marked = false;
-      newnode.fullylinked = false;
+      var newnode = node_create(x, topLevel);
       pthread_spin_init(&newnode.lock, 0);
       for var level = 0; level <= topLevel; ++level do
         newnode.next[level] = succs[level];
@@ -108,6 +116,58 @@ end
  */
 export
 def fhsl_b_remove(set * fhsl_b, key i64) -> bool
+begin
+  var nodeToDelete volatile *node = nil;
+  var isMarked = false;
+  var topLevel i32 = -1;
+  var preds [20]*node;
+  var succs [20]*node;
+  while true do
+    var lFound = find(set, key, preds, succs);
+    if isMarked || (lFound != -1 && ok_to_delete(succs[lFound], lFound)) then
+      if !isMarked then
+        nodeToDelete = succs[lFound];
+        topLevel = nodeToDelete.topLevel;
+        pthread_spin_lock(&nodeToDelete.lock);
+        if nodeToDelete.marked then
+          pthread_spin_unlock(&nodeToDelete.lock);
+          return false;
+        fi
+        nodeToDelete.marked = true;
+        isMarked = true;
+      fi
+      var highestlocked = -1;
+      var pred, succ, prevPred * node = nil, nil, nil;
+      var valid bool = true;
+      for var level = 0; valid && level <= topLevel; ++level do
+        pred = preds[level];
+        succ = succs[level];
+        if pred != prevPred then
+          pthread_spin_lock(&pred.lock);
+          highestlocked = level;
+          prevPred = pred;
+        fi
+        valid = (!pred.marked && pred.next[level] == succ);  
+      od
+      if !valid then
+        unlock_nodes(preds, highestlocked);
+        continue;
+      fi
+      for var level = 0; level <= topLevel; ++level do
+        preds[level].next[level] = nodeToDelete.next[level];
+      od
+      pthread_spin_unlock(&nodeToDelete.lock);
+      forkscan_retire(nodeToDelete);
+      unlock_nodes(preds, highestlocked);
+      return true;
+    else return false; fi
+  od
+end
+
+/** Remove a node, _leaky_, blocking, from the skiplist.
+ */
+export
+def fhsl_b_leaky_remove(set * fhsl_b, key i64) -> bool
 begin
   var nodeToDelete volatile *node = nil;
   var isMarked = false;
