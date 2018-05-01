@@ -59,6 +59,21 @@ typedef per_thread_data_t =
         stats          stats_t
     };
 
+/** Return the time in seconds.
+ */
+def hires_timer () -> f64
+begin
+    var ts timespec;
+    // FIXME: Need a convenient way to access C MACROs.
+    if 0 != clock_gettime(/*CLOCK_MONOTONIC=*/1, &ts) then
+        fprintf(stderr, "fatal: clock failed.\n");
+        exit(1);
+    fi
+    var sec = cast(type f64, ts.tv_sec);
+    var nsec = cast(type f64, ts.tv_nsec);
+    return sec + nsec / (1000.0 * 1000.0 * 1000.0);
+end
+
 def fast_rand (seed *u64) -> u64
 begin
     var val = seed[0];
@@ -275,24 +290,32 @@ begin
     return cast(type f64, successes) * 100.0F64 / cast(type f64, attempts);
 end
 
-def print_stats (stats *stats_t) -> void
+def print_stats (stats *stats_t, runtime f64) -> void
 begin
     var total_ops i64 = 0;
-    printf("  read-attempts    : %lld\n", stats.read_attempts);
-    printf("  read-successes   : %lld (%.1f%%)\n", stats.read_successes,
+    printf("  read-attempts      : %lld\n", stats.read_attempts);
+    printf("  read-successes     : %lld (%.1f%%)\n", stats.read_successes,
            success_rate(stats.read_attempts, stats.read_successes));
-    printf("  insert-attempts  : %lld\n", stats.insert_attempts);
-    printf("  insert-successes : %lld (%.1f%%)\n", stats.insert_successes,
+    printf("  reads-per-second   : %lld\n",
+           cast(type i64, stats.read_successes / runtime));
+    printf("  insert-attempts    : %lld\n", stats.insert_attempts);
+    printf("  insert-successes   : %lld (%.1f%%)\n", stats.insert_successes,
            success_rate(stats.insert_attempts, stats.insert_successes));
-    printf("  remove-attempts  : %lld\n", stats.remove_attempts);
-    printf("  remove-successes : %lld (%.1f%%)\n", stats.remove_successes,
+    printf("  inserts-per-second : %lld\n",
+           cast(type i64, stats.insert_successes / runtime));
+    printf("  remove-attempts    : %lld\n", stats.remove_attempts);
+    printf("  remove-successes   : %lld (%.1f%%)\n", stats.remove_successes,
            success_rate(stats.remove_attempts, stats.remove_successes));
+    printf("  removes-per-second : %lld\n",
+           cast(type i64, stats.remove_successes / runtime));
 
     total_ops = stats.read_successes
         + stats.insert_successes
         + stats.remove_successes;
 
-    printf("  total-operations : %lld\n", total_ops);
+    printf("  total-operations   : %lld\n", total_ops);
+    printf("  ops-per-second     : %lld\n",
+           cast(type i64, total_ops / runtime));
 end
 
 def thread (arg *void) -> *void
@@ -559,14 +582,15 @@ begin
         fi
     od
 
-    puts("begin");
+    puts("beginning");
 
+    var start_time = hires_timer();
     state = STATE_RUN;
     // Robust sleep against Forkscan signals.
     forkscan_sleep(config.duration_s);
     state = STATE_END;
 
-    puts("end");
+    puts("ending");
     printf("Joining threads.\n");
     for var i = 0; i < config.thread_count; ++i do
         var ret = pthread_join(tids[i], nil);
@@ -576,12 +600,16 @@ begin
         fi
         printf("[joined thread %d]\n", i);
     od
+    var runtime = hires_timer() - start_time;
 
     // Print out the statistics.
+    puts("Summary:");
+    printf("  runtime (s) : %.9f\n", runtime);
+
     var totals stats_t = { 0, 0, 0, 0, 0, 0 };
     for var i = 0; i < config.thread_count; ++i do
         printf("statistics for thread %d\n", i);
-        print_stats(&ptds[i].stats);
+        print_stats(&ptds[i].stats, runtime);
         totals.read_attempts += ptds[i].stats.read_attempts;
         totals.read_successes += ptds[i].stats.read_successes;
         totals.insert_attempts += ptds[i].stats.insert_attempts;
@@ -591,7 +619,7 @@ begin
     od
 
     printf("total statistics:\n");
-    print_stats(&totals);
+    print_stats(&totals, runtime);
 
     delete tids;
     delete ptds;
