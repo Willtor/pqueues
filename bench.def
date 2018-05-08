@@ -8,11 +8,13 @@ import "stdlib.h";
 // Set data structures:
 import "fhsl_lf.defi";
 import "fhsl_b.defi";
+import "fhsl_tx.defi";
 import "stacktrack/skip-list.h";
 
 typedef benchmark_t = enum
     | FHSL_LF
     | FHSL_B
+    | FHSL_TX
     | STACKTRACK
     ;
 
@@ -93,6 +95,7 @@ begin
     switch b with
     xcase FHSL_LF: return "fhsl_lf";
     xcase FHSL_B: return "fhsl_b";
+    xcase FHSL_TX: return "fhsl_tx";
     xcase STACKTRACK: return "stacktrack";
     xcase _: return "unknown benchmark";
     esac
@@ -120,6 +123,7 @@ begin
     printf("  -b <benchmark>: Set the benchmark. (default = fhsl_lf)\n");
     printf("     * fhsl_lf: Fixed-height skip list; lock-free.\n");
     printf("     * fhsl_b: Fixed-height skip list; blocking.\n");
+    printf("     * fhsl_tx: Fixed-height skip list; transactional.\n");
     printf("     * stacktrack: Use the StackTrack skiplist written in C.\n");
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
@@ -194,6 +198,7 @@ begin
             switch argv[i] with
             xcase "fhsl_lf": config.benchmark = FHSL_LF;
             xcase "fhsl_b": config.benchmark = FHSL_B;
+            xcase "fhsl_tx": config.benchmark = FHSL_TX;
             xcase "stacktrack": config.benchmark = STACKTRACK;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
@@ -260,6 +265,8 @@ begin
     ocase { FHSL_LF, POLICY_RETIRE }:
     ocase { FHSL_B, POLICY_LEAKY }:
     ocase { FHSL_B, POLICY_RETIRE }:
+    ocase { FHSL_TX, POLICY_LEAKY }:
+    ocase { FHSL_TX, POLICY_RETIRE }:
     ocase { STACKTRACK, POLICY_LEAKY }:
     ocase { STACKTRACK, POLICY_RETIRE }:
     ocase { STACKTRACK, POLICY_HAZARD }:
@@ -427,6 +434,38 @@ begin
             fi
 
 /***************************************************************************/
+/*                  fixed-height skip list, transactional                  */
+/***************************************************************************/
+
+            // Note: TBD: This is where a nice structural macro would do
+            // nicely.  This is basically the same code as the previous
+            // two cases.  Think about syntax for this kind of thing.
+        xcase FHSL_TX:
+            if action < read_action then
+                stats.read_attempts++;
+                if fhsl_tx_contains(set, val) then
+                    stats.read_successes++;
+                fi
+            elif action < add_action then
+                stats.insert_attempts++;
+                if fhsl_tx_add(&seed, set, val) then
+                    stats.insert_successes++;
+                fi
+            else
+                stats.remove_attempts++;
+                if policy == POLICY_LEAKY then
+                    if fhsl_tx_leaky_remove(set, val) then
+                        stats.remove_successes++;
+                    fi
+                else
+                    // policy = POLICY_RETIRE
+                    if fhsl_tx_remove(set, val) then
+                        stats.remove_successes++;
+                    fi
+                fi
+            fi
+
+/***************************************************************************/
 /*                    StackTrack fixed-height, blocking                    */
 /***************************************************************************/
 
@@ -542,6 +581,15 @@ begin
             fi
         od
         config.set = cast(type *void, set);
+    xcase FHSL_TX:
+        var set = fhsl_tx_create();
+        for var i = 0; i < config.init_size; ++i do
+            var val = fast_rand(seed) % config.upper_bound;
+            if false == fhsl_tx_add(seed, set, val) then
+                --i;
+            fi
+        od
+        config.set = set;
     xcase STACKTRACK:
         var set = skiplist_init();
         var st_thread = new st_thread_t;

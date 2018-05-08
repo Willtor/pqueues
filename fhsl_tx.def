@@ -1,0 +1,184 @@
+/* Fixed height skiplist: A skiplist implementation with an array of "next"
+ * nodes of fixed height.
+ */
+
+import "stdio.h";
+
+typedef node =
+    { val      i64,            // Value.
+      toplevel i32,            // Height.
+      next     [20]*node       // Follow-list of nodes.
+    };
+
+export opaque
+typedef fhsl_tx =
+    { head  node,
+      tail  node
+    };
+
+/** Print out the contents of the skip list along with node heights.
+ */
+export
+def fhsl_tx_print (set *fhsl_tx) -> void
+begin
+    var node = set.head.next[0];
+    while node != &set.tail do
+        printf("node[%d]: %lld\n", node.toplevel, node.val);
+        node = node.next[0];
+    od
+end
+
+/** Return a new fixed-height skip list.
+ */
+export
+def fhsl_tx_create () -> *fhsl_tx
+begin
+    var fhsl_tx = new fhsl_tx;
+    fhsl_tx.head.val = 0x8000000000000000I64;
+    fhsl_tx.tail.val = 0x7FFFFFFFFFFFFFFFI64;
+    for var i = 0; i < 20; ++i do
+        fhsl_tx.head.next[i] = &fhsl_tx.tail;
+        fhsl_tx.tail.next[i] = nil;
+    od
+    return fhsl_tx;
+end
+
+/** Return whether the skip list contains the value.
+ */
+export
+def fhsl_tx_contains (set *fhsl_tx, x i64) -> bool
+begin
+    var node = &set.head;
+    for var level = 19; level >= 0; --level do
+        var next = node.next[level];
+        while next.val <= x do
+            node = next;
+            next = node.next[level];
+        od
+    od
+    return node.val == x;
+end
+
+/** Add a node, lock-free, to the skiplist.
+ */
+export
+def fhsl_tx_add (seed *u64, set *fhsl_tx, x i64) -> bool
+begin
+    var preds [20]*node;
+    var succs [20]*node;
+    var toplevel = random_level(seed, 20);
+    var node = new node;
+    var added = false;
+
+    node.val = x;
+    node.toplevel = toplevel;
+
+    xbegin
+        if false == find(set, x, preds, succs) then
+            // Node didn't already exist in the set.  Add it in.
+            for var i = 0; i <= toplevel; ++i do
+                node.next[i] = succs[i];
+                preds[i].next[i] = node;
+            od
+            added = true;
+        fi
+    xend
+
+    if !added then
+        // failed to add the node.
+        delete node;
+    fi
+
+    return added;
+end
+
+/** Remove a node, lock-free, from the skiplist.
+ */
+export
+def fhsl_tx_remove (set *fhsl_tx, x i64) -> bool
+begin
+    var preds [20]*node;
+    var succs [20]*node;
+    var node *node = nil;
+
+    xbegin
+        if true == find(set, x, preds, succs) then
+            // Found the node.  Remove it.
+            node = succs[0];
+            for var i = 0; i <= node.toplevel; ++i do
+                preds[i].next[i] = node.next[i];
+            od
+        fi
+    xend
+
+    if node != nil then
+        // Removed the node.
+        retire node;
+        return true;
+    fi
+
+    return false;
+end
+
+/** Remove a node, lock-free, from the skiplist.  Leak the memory.
+ */
+export
+def fhsl_tx_leaky_remove (set *fhsl_tx, x i64) -> bool
+begin
+    var preds [20]*node;
+    var succs [20]*node;
+    var node *node = nil;
+
+    xbegin
+        if true == find(set, x, preds, succs) then
+            // Found the node.  Remove it.
+            node = succs[0];
+            for var i = 0; i <= node.toplevel; ++i do
+                preds[i].next[i] = node.next[i];
+            od
+        fi
+    xend
+
+    return node != nil;
+end
+
+def fast_rand (seed *u64) -> u64
+begin
+    var val = seed[0];
+    if val == 0 then val = 1; fi
+
+    val ^= val << 6;
+    val ^= val >> 21;
+    val ^= val << 7;
+
+    seed[0] = val;
+    return val;
+end
+
+def random_level (seed *u64, max u32) -> u32
+begin
+    var level = 1;
+    while fast_rand(seed) % 2 == 0 && level < max do
+        ++level;
+    od
+    return level - 1;
+end
+
+def find (set *fhsl_tx,
+          key i64,
+          preds [20]*node,
+          succs [20]*node) -> bool
+begin
+    var pred = &set.head;
+    var curr *node;
+    for var level = 19; level >= 0; --level do
+        curr = pred.next[level];
+        while curr.val < key do
+            pred = curr;
+            curr = curr.next[level];
+        od
+        preds[level] = pred;
+        succs[level] = curr;
+    od
+    return curr.val == key;
+end

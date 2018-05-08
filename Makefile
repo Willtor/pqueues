@@ -10,9 +10,11 @@ DEFLIBS = -lpthread
 CC = clang
 CFLAGS = $(OPTLEVEL) -mrtm
 
-DATASTRUCTS = \
-  fhsl_lf.def \
-  fhsl_b.def
+DATASTRUCTS =		\
+	fhsl_lf.def	\
+	fhsl_b.def	\
+	fhsl_tx.def
+
 DEFIFILES = $(DATASTRUCTS:.def=.defi)
 
 STACKTRACK = atomics.c common.c htm.c skip-list.c stack-track.c
