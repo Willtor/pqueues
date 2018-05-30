@@ -1,5 +1,6 @@
 #include "bt_lf.h"
 #include <assert.h>
+#include <forkscan.h>
 
 
 typedef struct _seek_record_t {
@@ -118,7 +119,7 @@ void bt_lf_seek(bt_lf_t * set, seek_record_t * sr, int64_t key){
 
 bool bt_lf_cleanup(bt_lf_t * set, seek_record_t *sr, int64_t key) {
     bt_lf_node_ptr ancestor = sr->ancestor, successor = sr->successor, parent = sr->parent, leaf = sr->leaf;
-    
+
     bt_lf_node_ptr volatile* successor_address = NULL;
     if(key < ancestor->key) {
         successor_address = &ancestor->left;
@@ -145,12 +146,12 @@ bool bt_lf_cleanup(bt_lf_t * set, seek_record_t *sr, int64_t key) {
         sibling_val = child_val;
         sibling_address = child_address;
     }
-    
+
     __sync_bool_compare_and_swap(sibling_address,
         sibling_val,
         bt_lf_node_tag(bt_lf_node_address(sibling_val), true));
     bt_lf_node_unpacked_t unpacked_sibbling = bt_lf_node_unpack(*sibling_address);
-    bool result = __sync_bool_compare_and_swap(successor_address, 
+    bool result = __sync_bool_compare_and_swap(successor_address,
         bt_lf_node_address(successor),
         bt_lf_node_flag(unpacked_sibbling.address, unpacked_sibbling.flagged));
     return result;
@@ -229,7 +230,7 @@ int bt_lf_remove_leaky(bt_lf_t * set, int64_t key) {
                 bt_lf_node_unpacked_t unpacked_node = bt_lf_node_unpack(*child_address);
                 if(unpacked_node.address == leaf &&
                     (unpacked_node.flagged || unpacked_node.tagged)){
-                    bt_lf_cleanup(set, &sr, key);
+                    bool done = bt_lf_cleanup(set, &sr, key);
                 }
             }
         } else {
@@ -240,7 +241,58 @@ int bt_lf_remove_leaky(bt_lf_t * set, int64_t key) {
                 if(done) {
                     return true;
                 }
-            } 
+            }
+        }
+    }
+}
+
+int bt_lf_remove_retire(bt_lf_t * set, int64_t key) {
+    enum REMOVE_STATE mode = INJECTION;
+    bt_lf_node_ptr leaf = NULL;
+    while(true) {
+        seek_record_t sr;
+        bt_lf_seek(set, &sr, key);
+        bt_lf_node_ptr parent = sr.parent;
+        bt_lf_node_ptr volatile* child_address = NULL;
+        int64_t parent_key = parent->key;
+        if(key < parent_key) {
+            child_address = &parent->left;
+        } else {
+            child_address = &parent->right;
+        }
+        if(mode == INJECTION) {
+            leaf = sr.leaf;
+            if(leaf->key != key) {
+                return false;
+            }
+            bool result = __sync_bool_compare_and_swap(child_address,
+                bt_lf_node_address(leaf),
+                bt_lf_node_flag(leaf, true));
+            if(result) {
+                mode = CLEANUP;
+                bool done = bt_lf_cleanup(set, &sr, key);
+                if(done) {
+                    forkscan_retire((void *)leaf);
+                    return true;
+                }
+            } else {
+                bt_lf_node_unpacked_t unpacked_node = bt_lf_node_unpack(*child_address);
+                if(unpacked_node.address == leaf &&
+                    (unpacked_node.flagged || unpacked_node.tagged)){
+                    bool done = bt_lf_cleanup(set, &sr, key);
+                }
+            }
+        } else {
+            if(sr.leaf != leaf) {
+                forkscan_retire((void *)leaf);
+                return true;
+            } else {
+                bool done = bt_lf_cleanup(set, &sr, key);
+                if(done) {
+                    forkscan_retire((void *)leaf);
+                    return true;
+                }
+            }
         }
     }
 }

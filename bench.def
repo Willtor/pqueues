@@ -277,6 +277,7 @@ begin
     ocase { STACKTRACK, POLICY_HAZARD }:
     ocase { STACKTRACK, POLICY_STACKTRACK }:
     ocase { BT_LF, POLICY_LEAKY}:
+    ocase { BT_LF, POLICY_RETIRE}:
     xcase _:
         printf("Unsupported configuration:\n");
         printf("  benchmark: %s\n  policy: %s\n",
@@ -356,8 +357,7 @@ end
 
 def thread (arg *void) -> *void
 begin
-    //var seed = cast(type u64, time(nil));
-    var seed = 0U64;
+    var seed = cast(type u64, time(nil));
     var ptd = cast(type volatile *per_thread_data_t, arg);
     var stats stats_t = { 0, 0, 0, 0, 0, 0 };
     var config *config_t = ptd.config;
@@ -568,9 +568,19 @@ begin
                 fi
             else
                 stats.remove_attempts++;
-                if 0 != bt_lf_remove_leaky(set, val) then
-                    stats.remove_successes++;
-                fi
+                switch policy with
+                xcase POLICY_LEAKY:
+                    if 0 != bt_lf_remove_leaky(set, val) then
+                        stats.remove_successes++;
+                    fi
+                xcase POLICY_RETIRE:
+                    if 0 != bt_lf_remove_retire(set, val) then
+                        stats.remove_successes++;
+                    fi
+                xcase _:
+                    printf("error: unsupported mem policy for benchmark.\n");
+                    exit(1);
+                esac
             fi
         xcase _:
             printf("error: unknown benchmark configuration.\n");
@@ -652,11 +662,8 @@ begin
         config.set = cast(type *void, set);
     xcase BT_LF:
         var set = bt_lf_create();
-        var pretend_seed = 0U64;
-        var pretend_set = fhsl_b_create();
         for var i = 0; i < config.init_size; ++i do
             var val = fast_rand(seed) % config.upper_bound;
-            var ans = fhsl_b_add(&pretend_seed, pretend_set, val);
             if 0 == bt_lf_add(set, val) then
                 --i;
             fi
@@ -672,8 +679,7 @@ export
 def main (argc i32, argv **char) -> i32
 begin
     var config = read_args(argc, argv);
-    //var seed = cast(type u64, time(nil));
-    var seed = 0U64;
+    var seed = cast(type u64, time(nil));
     var state = STATE_WAIT;
 
     forkscan_set_allocator(malloc, free, malloc_usable_size);

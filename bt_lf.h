@@ -26,5 +26,4 @@ bt_lf_t * bt_lf_create();
 int bt_lf_contains(bt_lf_t * set, int64_t key);
 int bt_lf_add(bt_lf_t * set, int64_t key);
 int bt_lf_remove_leaky(bt_lf_t * set, int64_t key);
-
-void print_tree(bt_lf_t * set);
+int bt_lf_remove_retire(bt_lf_t * set, int64_t key);

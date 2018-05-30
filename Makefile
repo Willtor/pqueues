@@ -8,7 +8,7 @@ DEFFLAGS = $(OPTLEVEL)
 DEFLIBS = -lpthread
 
 CC = clang
-CFLAGS = -O3 -mrtm
+CFLAGS = $(OPTLEVEL) -mrtm
 
 DATASTRUCTS =		\
 	fhsl_lf.def	\
