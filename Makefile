@@ -8,7 +8,7 @@ DEFFLAGS = $(OPTLEVEL)
 DEFLIBS = -lpthread
 
 CC = clang
-CFLAGS = $(OPTLEVEL) -mrtm
+CFLAGS = -O3 -mrtm
 
 DATASTRUCTS =		\
 	fhsl_lf.def	\
@@ -19,7 +19,9 @@ DEFIFILES = $(DATASTRUCTS:.def=.defi)
 
 STACKTRACK = atomics.c common.c htm.c skip-list.c stack-track.c
 
-SRC = $(DATASTRUCTS) $(STACKTRACK) bench.def
+BT_LF = bt_lf.c
+
+SRC = $(DATASTRUCTS) $(STACKTRACK) $(BT_LF) bench.def
 OBJ1 = $(SRC:.def=.o)
 OBJ = $(OBJ1:.c=.o)
 
