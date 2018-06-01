@@ -1,0 +1,189 @@
+/*
+ * Transactional Binary Search Tree 
+*/
+
+typedef bt_tx_node_t = {
+    key i64,
+    left volatile * volatile bt_tx_node_t,
+    right volatile * volatile bt_tx_node_t
+};
+
+typedef bt_tx_node_ptr =  volatile * volatile bt_tx_node_t;
+
+typedef bt_tx_t = {
+    R bt_tx_node_ptr,
+    S bt_tx_node_ptr
+};
+
+typedef bt_tx_node_unpacked_t = {
+    flagged bool, 
+    tagged bool,
+    address bt_tx_node_ptr
+};
+
+typedef seek_record_t = {
+    ancestor bt_tx_node_ptr,
+    successor bt_tx_node_ptr,
+    parent bt_tx_node_ptr,
+    leaf bt_tx_node_ptr
+};
+
+def bt_tx_node_create(key i64) -> *bt_tx_node_t
+begin
+    var node *bt_tx_node_t = new bt_tx_node_t;
+    node.key = key;
+    node.left = nil;
+    node.right = nil;
+    return node;
+end
+
+export
+def def_bt_tx_create() -> *bt_tx_t
+begin
+    var bt_tx = new bt_tx_t;
+    bt_tx.R = bt_tx_node_create(0x7FFFFFFFFFFFFFFFI64);
+    bt_tx.S = bt_tx_node_create(0x7FFFFFFFFFFFFFFEI64);
+    bt_tx.R.left = bt_tx.S;
+    bt_tx.S.left = bt_tx_node_create(0x7FFFFFFFFFFFFFFDI64);
+    bt_tx.S.right = bt_tx_node_create(0x7FFFFFFFFFFFFFFEI64);
+    return bt_tx;
+end
+
+def bt_tx_init_seek_record(bt_tx *bt_tx_t, sr *seek_record_t) -> void
+begin
+    sr.ancestor = bt_tx.R;
+    sr.successor = bt_tx.S;
+    sr.parent = bt_tx.S;
+    sr.leaf = bt_tx.S.left;
+end
+
+def bt_tx_node_setup(key i64, sibling_key i64, sibling_node bt_tx_node_ptr) -> bt_tx_node_ptr
+begin
+    var node = bt_tx_node_create(key);
+    var internal_node = bt_tx_node_create(key);
+    if key < sibling_key then
+        internal_node.left = node;
+        internal_node.right = sibling_node;
+        internal_node.key = sibling_key;
+    else
+        internal_node.left = sibling_node;
+        internal_node.right = node;
+    fi
+    return internal_node;
+end
+
+def bt_tx_seek(set *bt_tx_t, sr *seek_record_t, key i64) -> void
+begin
+    bt_tx_init_seek_record(set, sr);
+    var parent_field bt_tx_node_ptr = sr.parent.left;
+    var current_field bt_tx_node_ptr = sr.leaf.left;
+    var current bt_tx_node_ptr = current_field;
+
+    while(current != nil) do
+        sr.ancestor = sr.parent;
+        sr.successor = sr.leaf;
+        sr.parent = sr.leaf;
+        sr.leaf = current;
+        parent_field = current_field;
+        if key < current.key then
+            current_field = current.left;
+        else
+            current_field = current.right;
+        fi
+        current = current_field;
+    od
+end
+
+export
+def def_bt_tx_contains(set *bt_tx_t, key i64) -> bool
+begin
+    var sr seek_record_t;
+    bt_tx_seek(set, &sr, key);
+    return sr.leaf.key == key;
+end
+
+export
+def def_bt_tx_add(set *bt_tx_t, key i64) -> bool
+begin
+    var added = false;
+    xbegin
+        var sr seek_record_t;
+        bt_tx_seek(set, &sr, key);
+        var leaf_key = sr.leaf.key;
+        if leaf_key != key then
+            var parent, leaf = sr.parent, sr.leaf;
+            var parent_key = parent.key;
+            var internal_node = bt_tx_node_setup(key, leaf_key, leaf);
+            if key < parent_key then
+                parent.left = internal_node;
+            else
+                parent.right = internal_node;
+            fi
+            added = true;
+        fi
+    xend
+    return added;
+end
+
+export
+def def_bt_tx_remove_leaky(set *bt_tx_t, key i64) -> bool
+begin
+    var removed = false;
+    xbegin
+        var sr seek_record_t;
+        bt_tx_seek(set, &sr, key);
+        var leaf_key = sr.leaf.key;
+        if key == leaf_key then
+            var parent = sr.parent;
+            var sibling_val bt_tx_node_ptr = nil;
+            if key < parent.key then
+                sibling_val = parent.right;
+            else
+                sibling_val = parent.left;
+            fi
+            var ancestor = sr.ancestor;
+            if key < ancestor.key then
+                ancestor.left = sibling_val;
+            else 
+                ancestor.right = sibling_val;
+            fi
+            removed = true;
+        fi
+    xend
+    return removed;
+end
+
+export
+def def_bt_tx_remove_retire(set *bt_tx_t, key i64) -> bool
+begin
+    var removed = false;
+    var internal_node, removed_node bt_tx_node_ptr = nil, nil;
+    xbegin
+        var sr seek_record_t;
+        bt_tx_seek(set, &sr, key);
+        var leaf_key = sr.leaf.key;
+        if key == leaf_key then
+            var parent = sr.parent;
+            var sibling_val bt_tx_node_ptr = nil;
+            if key < parent.key then
+                sibling_val = parent.right;
+            else
+                sibling_val = parent.left;
+            fi
+            var ancestor = sr.ancestor;
+            if key < ancestor.key then
+                ancestor.left = sibling_val;
+            else 
+                ancestor.right = sibling_val;
+            fi
+            removed_node = sr.leaf;
+            internal_node = sr.parent;
+            removed = true;
+        fi
+    xend
+    if removed then
+        retire removed_node;
+        retire internal_node;
+    fi
+    return removed;
+end

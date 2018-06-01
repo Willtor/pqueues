@@ -67,7 +67,7 @@ bt_lf_t* bt_lf_create(){
     bt_lf_t * bt_lf = forkscan_malloc(sizeof(bt_lf_t));
     bt_lf->R = bt_lf_node_create(INT64_MAX);
     bt_lf->S = bt_lf_node_create(INT64_MAX - 1);
-    bt_lf->R->right = bt_lf->S;
+    bt_lf->R->left = bt_lf->S;
     bt_lf->S->left = bt_lf_node_create(INT64_MAX - 2);
     bt_lf->S->right = bt_lf_node_create(INT64_MAX - 1);
     return bt_lf;
@@ -186,6 +186,12 @@ int bt_lf_add(bt_lf_t *set, int64_t key) {
             if(result) {
                 return true;
             } else {
+                if(key < leaf_key) {
+                    forkscan_free((void *)internal_node->left);
+                } else {
+                    forkscan_free((void *)internal_node->right);
+                }
+                forkscan_free((void *)internal_node);
                 bt_lf_node_unpacked_t unpacked_node = bt_lf_node_unpack(*child_address);
                 if(unpacked_node.address == leaf &&
                     (unpacked_node.flagged || unpacked_node.tagged)){

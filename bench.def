@@ -6,6 +6,8 @@ import "time.h";
 import "stdlib.h";
 
 // Set data structures:
+import "def_bt_lf.defi";
+//import "def_bt_tx.defi";
 import "fhsl_lf.defi";
 import "fhsl_b.defi";
 import "fhsl_tx.defi";
@@ -17,7 +19,9 @@ typedef benchmark_t = enum
     | FHSL_B
     | FHSL_TX
     | STACKTRACK
-    | BT_LF
+    | C_BT_LF
+    | DEF_BT_LF
+    | DEF_BT_TX
     ;
 
 typedef memory_policy_t = enum
@@ -99,7 +103,9 @@ begin
     xcase FHSL_B: return "fhsl_b";
     xcase FHSL_TX: return "fhsl_tx";
     xcase STACKTRACK: return "stacktrack";
-    xcase BT_LF: return "bt_lf";
+    xcase C_BT_LF: return "bt_lf";
+    xcase DEF_BT_LF: return "def_bt_lf";
+    xcase DEF_BT_TX: return "def_bt_tx";
     xcase _: return "unknown benchmark";
     esac
     return "FIXME: need reachability detection after a switch.";
@@ -129,6 +135,8 @@ begin
     printf("     * fhsl_tx: Fixed-height skip list; transactional.\n");
     printf("     * stacktrack: Use the StackTrack skiplist written in C.\n");
     printf("     * bt_lf: Use the lock-free binary tree written in C.\n");
+    printf("     * def_bt_lf: Use the lock-free binary tree written in DEF.\n");
+    printf("     * def_bt_tx: Use the transactional binary tree written in DEF.\n");
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
@@ -204,7 +212,9 @@ begin
             xcase "fhsl_b": config.benchmark = FHSL_B;
             xcase "fhsl_tx": config.benchmark = FHSL_TX;
             xcase "stacktrack": config.benchmark = STACKTRACK;
-            xcase "bt_lf": config.benchmark = BT_LF;
+            xcase "bt_lf": config.benchmark = C_BT_LF;
+            xcase "def_bt_lf": config.benchmark = DEF_BT_LF;
+            xcase "def_bt_tx": config.benchmark = DEF_BT_TX;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
                 exit(1);
@@ -276,8 +286,12 @@ begin
     ocase { STACKTRACK, POLICY_RETIRE }:
     ocase { STACKTRACK, POLICY_HAZARD }:
     ocase { STACKTRACK, POLICY_STACKTRACK }:
-    ocase { BT_LF, POLICY_LEAKY}:
-    ocase { BT_LF, POLICY_RETIRE}:
+    ocase { C_BT_LF, POLICY_LEAKY}:
+    ocase { C_BT_LF, POLICY_RETIRE}:
+    ocase { DEF_BT_LF, POLICY_LEAKY}:
+    ocase { DEF_BT_LF, POLICY_RETIRE}:
+    ocase { DEF_BT_TX, POLICY_LEAKY }:
+    ocase { DEF_BT_TX, POLICY_RETIRE }:
     xcase _:
         printf("Unsupported configuration:\n");
         printf("  benchmark: %s\n  policy: %s\n",
@@ -553,9 +567,9 @@ begin
                 esac
             fi
 /***************************************************************************/
-/*                          lock-free binary tree                          */
+/*                      lock-free binary tree written in C                 */
 /***************************************************************************/
-        xcase BT_LF:
+        xcase C_BT_LF:
             if action < read_action then
                 stats.read_attempts++;
                 if 0 != bt_lf_contains(set, val) then
@@ -582,6 +596,66 @@ begin
                     exit(1);
                 esac
             fi
+/***************************************************************************/
+/*                   lock-free binary tree written in DEF                  */
+/***************************************************************************/
+        xcase DEF_BT_LF:
+            if action < read_action then
+                stats.read_attempts++;
+                if def_bt_lf_contains(set, val) then
+                    stats.read_successes++;
+                fi
+            elif action < add_action then
+                stats.insert_attempts++;
+                if def_bt_lf_add(set, val) then
+                    stats.insert_successes++;
+                fi
+            else
+                stats.remove_attempts++;
+                switch policy with
+                xcase POLICY_LEAKY:
+                    if def_bt_lf_remove_leaky(set, val) then
+                        stats.remove_successes++;
+                    fi
+                xcase POLICY_RETIRE:
+                    if def_bt_lf_remove_retire(set, val) then
+                        stats.remove_successes++;
+                    fi
+                xcase _:
+                    printf("error: unsupported mem policy for benchmark.\n");
+                    exit(1);
+                esac
+            fi
+/***************************************************************************/
+/*                transactional binary tree written in DEF                 */
+/***************************************************************************/
+        /*xcase DEF_BT_TX:
+            if action < read_action then
+                stats.read_attempts++;
+                if def_bt_tx_contains(set, val) then
+                    stats.read_successes++;
+                fi
+            elif action < add_action then
+                stats.insert_attempts++;
+                if def_bt_tx_add(set, val) then
+                    stats.insert_successes++;
+                fi
+            else
+                stats.remove_attempts++;
+                switch policy with
+                xcase POLICY_LEAKY:
+                   if def_bt_tx_remove_leaky(set, val) then
+                        stats.remove_successes++;
+                    fi
+                xcase POLICY_RETIRE:
+                    if def_bt_tx_remove_retire(set, val) then
+                        stats.remove_successes++;
+                    fi
+                xcase _:
+                    printf("error: unsupported mem policy for benchmark.\n");
+                    exit(1);
+                esac
+            fi*/
         xcase _:
             printf("error: unknown benchmark configuration.\n");
             exit(1);
@@ -660,7 +734,7 @@ begin
         ST_thread_finish(st_thread);
         delete st_thread;
         config.set = cast(type *void, set);
-    xcase BT_LF:
+    xcase C_BT_LF:
         var set = bt_lf_create();
         for var i = 0; i < config.init_size; ++i do
             var val = fast_rand(seed) % config.upper_bound;
@@ -669,6 +743,24 @@ begin
             fi
         od
         config.set = set;
+    xcase DEF_BT_LF:
+        var set = def_bt_lf_create();
+        for var i = 0; i < config.init_size; ++i do
+            var val = fast_rand(seed) % config.upper_bound;
+            if false == def_bt_lf_add(set, val) then
+                --i;
+            fi 
+        od
+        config.set = set;
+    /*xcase DEF_BT_TX:
+        var set *bt_tx_t = def_bt_tx_create();
+        for var i = 0; i < config.init_size; ++i do
+            var val = fast_rand(seed) % config.upper_bound;
+            if false == def_bt_tx_add(set, val) then
+                --i;
+            fi 
+        od
+        config.set = set;*/
     xcase _:
         printf("error: unable to initialize unknown set.\n");
         exit(1);

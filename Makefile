@@ -13,7 +13,9 @@ CFLAGS = $(OPTLEVEL) -mrtm
 DATASTRUCTS =		\
 	fhsl_lf.def	\
 	fhsl_b.def	\
-	fhsl_tx.def
+	fhsl_tx.def \
+	def_bt_lf.def \
+	def_bt_tx.def
 
 DEFIFILES = $(DATASTRUCTS:.def=.defi)
 
