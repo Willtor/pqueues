@@ -7,7 +7,7 @@ import "stdlib.h";
 
 // Set data structures:
 import "def_bt_lf.defi";
-//import "def_bt_tx.defi";
+import "def_bt_tx.defi";
 import "fhsl_lf.defi";
 import "fhsl_b.defi";
 import "fhsl_tx.defi";
@@ -629,7 +629,7 @@ begin
 /***************************************************************************/
 /*                transactional binary tree written in DEF                 */
 /***************************************************************************/
-        /*xcase DEF_BT_TX:
+        xcase DEF_BT_TX:
             if action < read_action then
                 stats.read_attempts++;
                 if def_bt_tx_contains(set, val) then
@@ -655,7 +655,7 @@ begin
                     printf("error: unsupported mem policy for benchmark.\n");
                     exit(1);
                 esac
-            fi*/
+            fi
         xcase _:
             printf("error: unknown benchmark configuration.\n");
             exit(1);
@@ -752,7 +752,7 @@ begin
             fi 
         od
         config.set = set;
-    /*xcase DEF_BT_TX:
+    xcase DEF_BT_TX:
         var set *bt_tx_t = def_bt_tx_create();
         for var i = 0; i < config.init_size; ++i do
             var val = fast_rand(seed) % config.upper_bound;
@@ -760,7 +760,7 @@ begin
                 --i;
             fi 
         od
-        config.set = set;*/
+        config.set = set;
     xcase _:
         printf("error: unable to initialize unknown set.\n");
         exit(1);

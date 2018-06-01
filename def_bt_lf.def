@@ -13,6 +13,7 @@ typedef bt_lf_node_t = {
 
 typedef bt_lf_node_ptr =  volatile * volatile bt_lf_node_t;
 
+export opaque
 typedef bt_lf_t = {
     R bt_lf_node_ptr,
     S bt_lf_node_ptr

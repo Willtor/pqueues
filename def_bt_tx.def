@@ -10,6 +10,7 @@ typedef bt_tx_node_t = {
 
 typedef bt_tx_node_ptr =  volatile * volatile bt_tx_node_t;
 
+export opaque
 typedef bt_tx_t = {
     R bt_tx_node_ptr,
     S bt_tx_node_ptr
