@@ -1,6 +1,6 @@
 DEF ?= def
 DEFGHI = defghi
-TARGET = pqueue_bench
+TARGET = set_bench
 
 OPTLEVEL = -O3
 
@@ -23,7 +23,7 @@ STACKTRACK = atomics.c common.c htm.c skip-list.c stack-track.c
 
 BT_LF = bt_lf.c
 
-SRC = $(DATASTRUCTS) $(STACKTRACK) $(BT_LF) bench.def
+SRC = $(DATASTRUCTS) $(STACKTRACK) $(BT_LF) set_bench.def
 OBJ1 = $(SRC:.def=.o)
 OBJ = $(OBJ1:.c=.o)
 
@@ -35,7 +35,7 @@ $(TARGET): $(OBJ)
 clean:
 	rm -f $(TARGET) *.defi *.o
 
-bench.o: $(DEFIFILES)
+set_bench.o: $(DEFIFILES)
 
 %.o: %.def
 	$(DEF) -o $@ $(DEFFLAGS) -c $<
