@@ -309,9 +309,8 @@ begin
     while ptd.state[0] == STATE_WAIT do
         // busy-wait.
     od
-    var insert_action = 50;
+    var insert_action = (fast_rand(&seed) % 100) < 50;
     while ptd.state[0] == STATE_RUN do
-        var action = fast_rand(&seed) % 100;
         var val i64 = fast_rand(&seed) % config.upper_bound;
         switch bench with
 
@@ -320,21 +319,24 @@ begin
 /***************************************************************************/
 
         xcase FHSL_LF:
-            if action < insert_action then
+            if insert_action then
                 stats.insert_attempts++;
                 if fhsl_lf_add(&seed, set, val) then
                     stats.insert_successes++;
+                    insert_action = false;
                 fi
-            else
+            else // insert_action == false.
                 stats.remove_attempts++;
                 if policy == POLICY_LEAKY then
                     if fhsl_lf_leaky_pop_min(set) then
                         stats.remove_successes++;
+                        insert_action = true;
                     fi
                 else
                     // policy = POLICY_RETIRE
                     if fhsl_lf_pop_min(set) then
                         stats.remove_successes++;
+                        insert_action = true;
                     fi
                 fi
             fi
