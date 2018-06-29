@@ -201,6 +201,7 @@ begin
 end
 
 /** Pop the front node from the list.  Return true iff there was a node to pop.
+ *  Leak the memory.
  */
 export
 def fhsl_lf_leaky_pop_min (set *fhsl_lf) -> bool
@@ -237,6 +238,7 @@ begin
 
         if __builtin_cas(&node_to_remove.next[0], unmark(succ), mark(succ))
         then
+            find(set, node_to_remove.val, preds, succs);
             return true;
         fi
     od
@@ -279,6 +281,7 @@ begin
 
         if __builtin_cas(&node_to_remove.next[0], unmark(succ), mark(succ))
         then
+            find(set, node_to_remove.val, preds, succs);
             retire node_to_remove;
             return true;
         fi
