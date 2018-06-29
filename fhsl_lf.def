@@ -143,6 +143,7 @@ begin
                 succ = succs[0].next[0];
                 marked = is_marked(succ);
                 if i_marked_it then
+                    // FIXME: succs[0]?  Should retire node_to_remove?
                     retire succs[0];
                     find(set, x, preds, succs);
                     return true;
@@ -195,6 +196,91 @@ begin
                     return false;
                 fi
             od
+        fi
+    od
+end
+
+/** Pop the front node from the list.  Return true iff there was a node to pop.
+ */
+export
+def fhsl_lf_leaky_pop_min (set *fhsl_lf) -> bool
+begin
+    var preds [20]*node;
+    var succs [20]*node;
+    var succ *node;
+
+    while true do
+        var node_to_remove = set.head.next[0];
+        if node_to_remove == &set.tail then
+            return false;
+        fi
+
+        for var level = node_to_remove.toplevel; level >= 0; --level do
+            preds[level] = &set.head;
+            succs[level] = node_to_remove;
+        od
+
+        for var level = node_to_remove.toplevel;
+            level >= 1;
+            --level
+        do
+            succ = node_to_remove.next[level];
+            var marked = is_marked(succ);
+            while !marked do
+                __builtin_cas(&node_to_remove.next[level], unmark(succ),
+                              mark(succ));
+                succ = node_to_remove.next[level];
+                marked = is_marked(succ);
+            od
+        od
+        succ = node_to_remove.next[0];
+
+        if __builtin_cas(&node_to_remove.next[0], unmark(succ), mark(succ))
+        then
+            return true;
+        fi
+    od
+end
+
+/** Pop the front node from the list.  Return true iff there was a node to pop.
+ *  Don't leak the memory.
+ */
+export
+def fhsl_lf_pop_min (set *fhsl_lf) -> bool
+begin
+    var preds [20]*node;
+    var succs [20]*node;
+    var succ *node;
+
+    while true do
+        var node_to_remove = set.head.next[0];
+        if node_to_remove == &set.tail then
+            return false;
+        fi
+        for var level = node_to_remove.toplevel; level >= 0; --level do
+            preds[level] = &set.head;
+            succs[level] = node_to_remove;
+        od
+
+        for var level = node_to_remove.toplevel;
+            level >= 1;
+            --level
+        do
+            succ = node_to_remove.next[level];
+            var marked = is_marked(succ);
+            while !marked do
+                __builtin_cas(&node_to_remove.next[level], unmark(succ),
+                              mark(succ));
+                succ = node_to_remove.next[level];
+                marked = is_marked(succ);
+            od
+        od
+        succ = node_to_remove.next[0];
+
+        if __builtin_cas(&node_to_remove.next[0], unmark(succ), mark(succ))
+        then
+            retire node_to_remove;
+            return true;
         fi
     od
 end

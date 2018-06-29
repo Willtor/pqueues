@@ -1,6 +1,8 @@
 DEF ?= def
 DEFGHI = defghi
-TARGET = set_bench
+SET_BENCH = set_bench
+PRIORITY_BENCH = priority_bench
+TARGETS = $(SET_BENCH) $(PRIORITY_BENCH)
 
 OPTLEVEL = -O3
 
@@ -23,19 +25,27 @@ STACKTRACK = atomics.c common.c htm.c skip-list.c stack-track.c
 
 BT_LF = bt_lf.c
 
-SRC = $(DATASTRUCTS) $(STACKTRACK) $(BT_LF) set_bench.def
+SRC = $(DATASTRUCTS) $(STACKTRACK) $(BT_LF)
 OBJ1 = $(SRC:.def=.o)
 OBJ = $(OBJ1:.c=.o)
 
-all: $(TARGET)
+SET_BENCH_SRC = $(SET_BENCH:=.def)
+PRIORITY_BENCH_SRC = $(PRIORITY_BENCH:=.def)
 
-$(TARGET): $(OBJ)
+all: $(SET_BENCH) $(PRIORITY_BENCH)
+
+$(SET_BENCH): $(SET_BENCH_SRC:.def=.o) $(OBJ)
+	$(DEF) -o $@ $(DEFFLAGS) $(DEFLIBS) $^
+
+$(PRIORITY_BENCH): $(PRIORITY_BENCH_SRC:.def=.o) $(OBJ)
 	$(DEF) -o $@ $(DEFFLAGS) $(DEFLIBS) $^
 
 clean:
 	rm -f $(TARGET) *.defi *.o
 
 set_bench.o: $(DEFIFILES)
+
+priority_bench.o: $(DEFIFILES)
 
 %.o: %.def
 	$(DEF) -o $@ $(DEFFLAGS) -c $<
