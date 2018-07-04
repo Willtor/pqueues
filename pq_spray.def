@@ -262,7 +262,7 @@ def ref_and_markbit (ptr *node_t) -> { *node_t, bool } =
     { unmark(ptr), is_marked(ptr) };
 
 def mark (ptr *node_t) -> *node_t =
-    cast(type *node, 0x1I64 | cast(type i64, ptr));
+    cast(type *node_t, 0x1I64 | cast(type i64, ptr));
 
 def unmark (ptr *node_t) -> *node_t =
     cast(type *node_t, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
