@@ -1,0 +1,271 @@
+/* Fixed height skiplist: A skiplist implementation with an array of "next"
+ * nodes of fixed height.
+ */
+
+import "stdio.h";
+
+typedef node_state_t = enum
+    | PADDING
+    | ACTIVE
+    | DELETED
+    ;
+
+typedef node_t =
+    {
+      priority i64,                 // Key.
+      val      i64,                 // Value.
+      toplevel i32,                 // Height.
+      state volatile node_state_t,
+      next     [20]*node_t          // Follow-list of nodes.
+    };
+
+export opaque
+typedef spray_pqueue_config_t =
+    {
+      thread_count u64,
+      start_height u64,
+      max_jump u64,
+      descend_amount u64,
+      padding_amount u64
+    };
+
+
+export opaque
+typedef spray_pqueue_t =
+    {
+      config spray_pqueue_config_t,
+      padding_head node_t,
+      head  node_t,
+      tail  node_t
+    };
+
+
+/** Print out the contents of the skip list along with node heights.
+ */
+export
+def spray_pqueue_print (set *spray_pqueue_t) -> void
+begin
+    var node = set.head.next[0];
+    while unmark(node) != &set.tail do
+        if is_marked(node.next[0]) then
+            node = unmark(node).next[0];
+        else
+            node = unmark(node);
+            printf("node[%d]: %lld\n", node.toplevel, node.val);
+            node = node.next[0];
+        fi
+    od
+end
+
+/** Return a new fixed-height skip list.
+ */
+export
+def spray_pqueue_create (config spray_pqueue_config_t) -> *spray_pqueue_t
+begin
+    var spray_pqueue = new spray_pqueue_t;
+    spray_pqueue.config = config;
+    spray_pqueue.head.val = 0x8000000000000000I64;
+    spray_pqueue.head.state = PADDING;
+    spray_pqueue.tail.val = 0x7FFFFFFFFFFFFFFFI64;
+    spray_pqueue.tail.state = PADDING;
+    for var i = 0; i < 20; ++i do
+        spray_pqueue.head.next[i] = &spray_pqueue.tail;
+        spray_pqueue.tail.next[i] = nil;
+    od
+    // Insert dummy nodes
+    var current_padding *node_t = &spray_pqueue.padding_head; 
+    for var i = 1; i < config.padding_amount; ++i do
+        var padding_node = new node_t;
+        padding_node.state = PADDING;
+        for var i = 0; i < 20; ++i do
+            current_padding.next[i] = padding_node;
+        od
+        current_padding = padding_node;
+    od
+    // Link up last padding node with the actual head.
+    for var i = 0; i < 20; ++i do
+        current_padding.next[i] = &spray_pqueue.head;
+    od
+    return spray_pqueue;
+end
+
+/** Add a node, lock-free, to the priority queue.
+ */
+export
+def spray_pqueue_add (seed *u64, set *spray_pqueue_t, priority i64, val i64) -> bool
+begin
+    var preds [20]*node_t;
+    var succs [20]*node_t;
+    var toplevel = random_level(seed, 20);
+    while true do
+        if find(set, priority, preds, succs) then
+            return false;
+        else
+            var node = new node_t;
+            node.priority = priority;
+            node.val = val;
+            node.toplevel = toplevel;
+            for var i = 0; i <= toplevel; ++i do
+                node.next[i] = unmark(succs[i]);
+            od
+            var pred = preds[0];
+            var succ = succs[0];
+            if !__builtin_cas(&pred.next[0], unmark(succ), node) then
+                continue;
+            fi
+            for var i = 1; i < toplevel; ++i do
+                while true do
+                    pred = preds[i];
+                    succ = succs[i];
+                    if __builtin_cas(&pred.next[i], unmark(succ), node) then
+                        break;
+                    fi
+                    find(set, priority, preds, succs);
+                od
+            od
+            return true;
+        fi
+    od
+    return true;
+end
+
+/** Remove a node, lock-free, from the skiplist.
+ */
+export
+def spray_pqueue_remove (seed *u64, set *spray_pqueue_t) -> {bool, i64, i64} // = {success, key, value}
+begin
+    while true do
+        var cleaner = (fast_rand(seed) % set.config.thread_count) == 0;
+        if cleaner then 
+            continue;
+        fi
+        var node = spray(seed, set);
+        
+        // Spray failed, try again
+        if node.state == PADDING || node.state == DELETED then
+            continue;
+        fi
+
+        var res = __builtin_cas(&node.state, ACTIVE, DELETED);
+        // We didn't delete a node from the list.
+        if !res then
+            continue;
+        else
+          retire(node);
+          return {true, node.priority, node.val};
+        fi
+    od
+    return {true, 0, 0};
+end
+
+/** Remove a node, lock-free, from the skiplist.  Leak the memory.
+ */
+export
+def spray_pqueue_leaky_remove (seed *u64, set *spray_pqueue_t) -> {bool, i64, i64}
+begin
+    while true do
+        var cleaner = (fast_rand(seed) % set.config.thread_count) == 0;
+        if cleaner then 
+            continue;
+        fi
+        var node = spray(seed, set);
+        
+        // Spray failed, try again
+        if node.state == PADDING || node.state == DELETED then
+            continue;
+        fi
+
+        var res = __builtin_cas(&node.state, ACTIVE, DELETED);
+        // We didn't delete a node from the list.
+        if !res then
+            continue;
+        else
+          retire(node);
+          return {true, node.priority, node.val};
+        fi
+    od
+    return {true, 0, 0};
+end
+
+def fast_rand (seed *u64) -> u64
+begin
+    var val = seed[0];
+    if val == 0 then val = 1; fi
+
+    val ^= val << 6;
+    val ^= val >> 21;
+    val ^= val << 7;
+
+    seed[0] = val;
+    return val;
+end
+
+def random_level (seed *u64, max u32) -> u32
+begin
+    var level = 1;
+    while fast_rand(seed) % 2 == 0 && level < max do
+        ++level;
+    od
+    return level - 1;
+end
+
+def spray (seed *u64, set *spray_pqueue_t) -> *node_t
+begin
+    var cur_node *node_t = &set.padding_head;
+    var D = set.config.descend_amount;
+    for var H = set.config.start_height; H > 0; H = H - D do
+        var jump = fast_rand(seed) % set.config.max_jump;
+        while jump > 0 do
+            var next = cur_node.next[H];
+            if next == nil then
+                break;
+            fi
+            cur_node = next;
+            jump--;
+        od
+    od
+    return cur_node;
+end 
+
+def find (set *spray_pqueue_t, priority i64, preds [20]*node_t, succs [20]*node_t) -> bool
+begin
+    var marked, snip bool;
+    var pred, curr, succ *node_t = nil, nil, nil;
+retry:
+    while true do
+        pred = &set.head;
+        for var level = 19; level >= 0; --level do
+            curr = unmark(pred.next[level]);
+            while true do
+                { succ, marked } = ref_and_markbit(curr.next[level]);
+                while marked do
+                    snip = __builtin_cas(&pred.next[level], curr, succ);
+                    if !snip then goto retry; fi
+                    curr = unmark(pred.next[level]);
+                    { succ, marked } = ref_and_markbit(curr.next[level]);
+                od
+                if curr.priority < priority then
+                    pred = curr;
+                    curr = succ;  
+                else
+                    break;
+                fi
+            od
+            preds[level] = pred;
+            succs[level] = curr;
+        od
+        return curr.priority == priority;
+    od
+end
+
+def ref_and_markbit (ptr *node_t) -> { *node_t, bool } =
+    { unmark(ptr), is_marked(ptr) };
+
+def mark (ptr *node_t) -> *node_t =
+    cast(type *node, 0x1I64 | cast(type i64, ptr));
+
+def unmark (ptr *node_t) -> *node_t =
+    cast(type *node_t, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
+
+def is_marked (ptr *node_t) -> bool =
+    cast(type bool, 0x1I64 & cast(type i64, ptr));

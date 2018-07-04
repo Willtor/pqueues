@@ -7,9 +7,13 @@ import "stdlib.h";
 
 // Set data structures:
 import "fhsl_lf.defi";
+import "sl_pqueue.defi";
+//import "def_pq_spray.defi";
 
 typedef benchmark_t = enum
     | FHSL_LF
+    | SPRAY
+    | SL_PQ
     ;
 
 typedef memory_policy_t = enum
@@ -83,6 +87,7 @@ def string_of_benchmark (b benchmark_t) -> *char
 begin
     switch b with
     xcase FHSL_LF: return "fhsl_lf";
+    xcase SPRAY: return "spray";
     xcase _: return "unknown benchmark";
     esac
     return "FIXME: need reachability detection after a switch.";
@@ -106,6 +111,8 @@ begin
     printf("  -d <n>: Benchmark duration in seconds. (default = 1)\n");
     printf("  -b <benchmark>: Set the benchmark. (default = fhsl_lf)\n");
     printf("     * fhsl_lf: Fixed-height skip list; lock-free.\n");
+    printf("     * sl_pq: Fixed-height skip list Shavit Lotan priority queue; lock-free underneath.\n");
+    printf("     * spray: Fixed-height skip list based priority queue; lock-free with spray delete min.\n");
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
@@ -175,6 +182,8 @@ begin
             fi
             switch argv[i] with
             xcase "fhsl_lf": config.benchmark = FHSL_LF;
+            xcase "spray": config.benchmark = SPRAY;
+            xcase "sl_pq": config.benchmark = SL_PQ;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
                 exit(1);
@@ -229,6 +238,8 @@ begin
     switch { config.benchmark, config.policy } with
     xcase { FHSL_LF, POLICY_LEAKY }:
     ocase { FHSL_LF, POLICY_RETIRE }:
+    ocase { SL_PQ, POLICY_LEAKY }:
+    ocase { SL_PQ, POLICY_RETIRE }:
     xcase _:
         printf("Unsupported configuration:\n");
         printf("  benchmark: %s\n  policy: %s\n",
@@ -340,6 +351,33 @@ begin
                     fi
                 fi
             fi
+        xcase SL_PQ:
+            if insert_action then
+                stats.insert_attempts++;
+                if sl_pqueue_add(&seed, set, val) then
+                    stats.insert_successes++;
+                    insert_action = false;
+                fi
+            else // insert_action == false.
+                stats.remove_attempts++;
+                if policy == POLICY_LEAKY then
+                    if sl_pqueue_leaky_pop_min(set) then
+                        stats.remove_successes++;
+                        insert_action = true;
+                    fi
+                else
+                    // policy = POLICY_RETIRE
+                    if sl_pqueue_pop_min(set) then
+                        stats.remove_successes++;
+                        insert_action = true;
+                    fi
+                fi
+            fi
+/***************************************************************************/
+/*             Spray-list with underlying lock-free skip-list              */
+/***************************************************************************/
+        xcase SPRAY:
+            printf("Spray queue bench thread.");
 
         xcase _:
             printf("error: unknown benchmark configuration.\n");
@@ -361,6 +399,15 @@ begin
         for var i = 0; i < config.init_size; ++i do
             var val = fast_rand(seed) % config.upper_bound;
             if false == fhsl_lf_add(seed, set, val) then
+                --i;
+            fi
+        od
+        config.set = set;
+    xcase SL_PQ:
+        var set = sl_pqueue_create();
+        for var i = 0; i < config.init_size; ++i do
+            var val = fast_rand(seed) % config.upper_bound;
+            if false == sl_pqueue_add(seed, set, val) then
                 --i;
             fi
         od

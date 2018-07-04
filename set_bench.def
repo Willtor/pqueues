@@ -342,9 +342,9 @@ begin
     printf("  removes-per-second : %lld\n",
            cast(type i64, stats.remove_successes / runtime));
 
-    total_ops = stats.read_successes
-        + stats.insert_successes
-        + stats.remove_successes;
+    total_ops = stats.read_attempts
+        + stats.insert_attempts
+        + stats.remove_attempts;
 
     printf("  total-operations   : %lld\n", total_ops);
     printf("  ops-per-second     : %lld\n",
@@ -355,9 +355,9 @@ def print_csv (config *config_t, stats *stats_t, runtime f64) -> void
 begin
     puts("# fields: name, benchmark, policy, threads, init_size, upper_bound, update_rate, ops/sec");
 
-    var total_ops = stats.read_successes
-        + stats.insert_successes
-        + stats.remove_successes;
+    var total_ops = stats.read_attempts
+        + stats.insert_attempts
+        + stats.remove_attempts;
 
     printf("pqueue_bench, %s, %s, %d, %lld, %lld, %d, %lld\n",
            string_of_benchmark(config.benchmark),
@@ -381,9 +381,12 @@ begin
 
     // StackTrack, since it was originally part of a different benchmark, does
     // things differently.  We aim to please.
-    var st_thread = new st_thread_t;
-    var st_seed = cast(type i32, seed);
-    ST_thread_init(st_thread, &st_seed, 50, 100);
+    var st_thread *st_thread_t = nil;
+    if bench == STACKTRACK then
+        var st_seed = cast(type i32, seed);
+        st_thread = new st_thread_t;
+        ST_thread_init(st_thread, &st_seed, 50, 100);
+    fi
 
     printf("[started thread %d]\n", ptd.id);
     while ptd.state[0] == STATE_WAIT do
@@ -662,10 +665,11 @@ begin
         esac
     od
     printf("FINISHED\n");
-    // Cleanup StackTrack.
-    ST_thread_finish(st_thread);
-    delete st_thread;
-    printf("FINISHED\n");
+    if bench == STACKTRACK then
+        // Cleanup StackTrack.
+        ST_thread_finish(st_thread);
+        delete st_thread;
+    fi
 
     // Store this thread's statistics in the per-thread-data.
     ptd.stats = stats;

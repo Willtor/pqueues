@@ -1,3 +1,4 @@
 *.o
 *.defi
-pqueue_bench
+priority_bench
+set_bench

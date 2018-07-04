@@ -4,14 +4,20 @@
 
 import "stdio.h";
 
+typedef state_t = enum
+    | ACTIVE
+    | DELETED
+    ;
+
 typedef node =
     { val      i64,            // Value.
+      state volatile state_t,  // Logical deletion state.
       toplevel i32,            // Height.
       next     [20]*node       // Follow-list of nodes.
     };
 
 export opaque
-typedef fhsl_lf =
+typedef sh_pqueue =
     { head  node,
       tail  node
     };
@@ -19,7 +25,7 @@ typedef fhsl_lf =
 /** Print out the contents of the skip list along with node heights.
  */
 export
-def fhsl_lf_print (set *fhsl_lf) -> void
+def sh_pqueue_print (set *sh_pqueue) -> void
 begin
     var node = set.head.next[0];
     while unmark(node) != &set.tail do
@@ -36,22 +42,22 @@ end
 /** Return a new fixed-height skip list.
  */
 export
-def fhsl_lf_create () -> *fhsl_lf
+def sh_pqueue_create () -> *sh_pqueue
 begin
-    var fhsl_lf = new fhsl_lf;
-    fhsl_lf.head.val = 0x8000000000000000I64;
-    fhsl_lf.tail.val = 0x7FFFFFFFFFFFFFFFI64;
+    var sh_pqueue = new sh_pqueue;
+    sh_pqueue.head.val = 0x8000000000000000I64;
+    sh_pqueue.tail.val = 0x7FFFFFFFFFFFFFFFI64;
     for var i = 0; i < 20; ++i do
-        fhsl_lf.head.next[i] = &fhsl_lf.tail;
-        fhsl_lf.tail.next[i] = nil;
+        sh_pqueue.head.next[i] = &sh_pqueue.tail;
+        sh_pqueue.tail.next[i] = nil;
     od
-    return fhsl_lf;
+    return sh_pqueue;
 end
 
 /** Return whether the skip list contains the value.
  */
 export
-def fhsl_lf_contains (set *fhsl_lf, x i64) -> bool
+def sh_pqueue_contains (set *sh_pqueue, x i64) -> bool
 begin
     // FIXME: Nir's book does this differently.  Figure out whether this
     // still works and maybe replace.
@@ -63,7 +69,7 @@ begin
             next = unmark(node.next[level]);
         od
         if node.val == x then
-            if !is_marked(node.next[0]) then return true; fi
+            if !is_marked(node.next[0]) then return node.state == ACTIVE; fi
             return false;
         fi
     od
@@ -73,7 +79,7 @@ end
 /** Add a node, lock-free, to the skiplist.
  */
 export
-def fhsl_lf_add (seed *u64, set *fhsl_lf, x i64) -> bool
+def sh_pqueue_add (seed *u64, set *sh_pqueue, x i64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -85,6 +91,7 @@ begin
             var node = new node;
             node.val = x;
             node.toplevel = toplevel;
+            node.state = ACTIVE;
             for var i = 0; i <= toplevel; ++i do
                 node.next[i] = unmark(succs[i]);
             od
@@ -112,7 +119,7 @@ end
 /** Remove a node, lock-free, from the skiplist.
  */
 export
-def fhsl_lf_remove (set *fhsl_lf, x i64) -> bool
+def sh_pqueue_remove (set *sh_pqueue, x i64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -159,7 +166,7 @@ end
 /** Remove a node, lock-free, from the skiplist.  Leak the memory.
  */
 export
-def fhsl_lf_leaky_remove (set *fhsl_lf, x i64) -> bool
+def sh_pqueue_leaky_remove (set *sh_pqueue, x i64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -205,88 +212,40 @@ end
  *  Leak the memory.
  */
 export
-def fhsl_lf_leaky_pop_min (set *fhsl_lf) -> bool
+def sh_pqueue_leaky_pop_min (set *sh_pqueue) -> bool
 begin
-    var preds [20]*node;
-    var succs [20]*node;
-    var succ *node;
-
-    while true do
-        var node_to_remove = set.head.next[0];
-        if node_to_remove == &set.tail then
-            return false;
+    var curr = set.head.next[0];
+    for var curr = set.head.next[0]; curr != &set.tail; curr = curr.next[0] do
+        if curr.state == DELETED then
+            continue;
         fi
-
-        for var level = node_to_remove.toplevel; level >= 0; --level do
-            preds[level] = &set.head;
-            succs[level] = node_to_remove;
-        od
-
-        for var level = node_to_remove.toplevel;
-            level >= 1;
-            --level
-        do
-            succ = node_to_remove.next[level];
-            var marked = is_marked(succ);
-            while !marked do
-                __builtin_cas(&node_to_remove.next[level], unmark(succ),
-                              mark(succ));
-                succ = node_to_remove.next[level];
-                marked = is_marked(succ);
-            od
-        od
-        succ = node_to_remove.next[0];
-
-        if __builtin_cas(&node_to_remove.next[0], unmark(succ), mark(succ))
-        then
-            find(set, node_to_remove.val, preds, succs);
-            return true;
+        var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
+        if res then 
+            // Physically delete the node now.
+            return sh_pqueue_leaky_remove(set, curr.val);
         fi
     od
+    return false;
 end
 
 /** Pop the front node from the list.  Return true iff there was a node to pop.
  *  Don't leak the memory.
  */
 export
-def fhsl_lf_pop_min (set *fhsl_lf) -> bool
+def sh_pqueue_pop_min (set *sh_pqueue) -> bool
 begin
-    var preds [20]*node;
-    var succs [20]*node;
-    var succ *node;
-
-    while true do
-        var node_to_remove = set.head.next[0];
-        if node_to_remove == &set.tail then
-            return false;
+    var curr = set.head.next[0];
+    for var curr = set.head.next[0]; curr != &set.tail; curr = curr.next[0] do
+        if curr.state == DELETED then
+            continue;
         fi
-        for var level = node_to_remove.toplevel; level >= 0; --level do
-            preds[level] = &set.head;
-            succs[level] = node_to_remove;
-        od
-
-        for var level = node_to_remove.toplevel;
-            level >= 1;
-            --level
-        do
-            succ = node_to_remove.next[level];
-            var marked = is_marked(succ);
-            while !marked do
-                __builtin_cas(&node_to_remove.next[level], unmark(succ),
-                              mark(succ));
-                succ = node_to_remove.next[level];
-                marked = is_marked(succ);
-            od
-        od
-        succ = node_to_remove.next[0];
-
-        if __builtin_cas(&node_to_remove.next[0], unmark(succ), mark(succ))
-        then
-            find(set, node_to_remove.val, preds, succs);
-            retire node_to_remove;
-            return true;
+        var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
+        if res then 
+            // Physically delete the node now.
+            return sh_pqueue_remove(set, curr.val);
         fi
     od
+    return false;
 end
 
 def fast_rand (seed *u64) -> u64
@@ -311,7 +270,7 @@ begin
     return level - 1;
 end
 
-def find (set *fhsl_lf,
+def find (set *sh_pqueue,
           key i64,
           preds [20]*node,
           succs [20]*node) -> bool

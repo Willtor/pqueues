@@ -129,27 +129,29 @@ end
 export
 def def_bt_tx_remove_leaky(set *bt_tx_t, key i64) -> bool
 begin
+
     var removed = false;
     xbegin
-        var sr seek_record_t;
-        bt_tx_seek(set, &sr, key);
-        var leaf_key = sr.leaf.key;
-        if key == leaf_key then
-            var parent = sr.parent;
-            var sibling_val bt_tx_node_ptr = nil;
-            if key < parent.key then
-                sibling_val = parent.right;
-            else
-                sibling_val = parent.left;
-            fi
-            var ancestor = sr.ancestor;
-            if key < ancestor.key then
-                ancestor.left = sibling_val;
-            else 
-                ancestor.right = sibling_val;
-            fi
-            removed = true;
+    var valid = true;
+    var sr seek_record_t;
+    bt_tx_seek(set, &sr, key);
+    var leaf_key = sr.leaf.key;
+    if key == leaf_key then
+        var parent = sr.parent;
+        var sibling_val bt_tx_node_ptr = nil;
+        if key < parent.key then
+            sibling_val = parent.right;
+        else
+            sibling_val = parent.left;
         fi
+        var ancestor = sr.ancestor;
+        if key < ancestor.key then
+            ancestor.left = sibling_val;
+        else 
+            ancestor.right = sibling_val;
+        fi
+        removed = true;
+    fi
     xend
     return removed;
 end
