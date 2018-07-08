@@ -1,5 +1,7 @@
-/* Fixed height skiplist: A skiplist implementation with an array of "next"
- * nodes of fixed height.
+/* A Shavit Lotan priority queue written in DEF.
+ * Like the original description in the paper this queue has a skiplist
+ * as the underlying data-structure for ordering elements.
+ * The data-structure is lock-free and quiescently consistent.
  */
 
 import "stdio.h";
@@ -17,15 +19,13 @@ typedef node =
     };
 
 export opaque
-typedef sh_pqueue =
+typedef shavit_lotan_pqueue =
     { head  node,
       tail  node
     };
 
-/** Print out the contents of the skip list along with node heights.
- */
 export
-def sh_pqueue_print (set *sh_pqueue) -> void
+def shavit_lotan_pqueue_print (set *shavit_lotan_pqueue) -> void
 begin
     var node = set.head.next[0];
     while unmark(node) != &set.tail do
@@ -42,44 +42,22 @@ end
 /** Return a new fixed-height skip list.
  */
 export
-def sh_pqueue_create () -> *sh_pqueue
+def shavit_lotan_pqueue_create () -> *shavit_lotan_pqueue
 begin
-    var sh_pqueue = new sh_pqueue;
-    sh_pqueue.head.val = 0x8000000000000000I64;
-    sh_pqueue.tail.val = 0x7FFFFFFFFFFFFFFFI64;
+    var shavit_lotan_pqueue = new shavit_lotan_pqueue;
+    shavit_lotan_pqueue.head.val = 0x8000000000000000I64;
+    shavit_lotan_pqueue.tail.val = 0x7FFFFFFFFFFFFFFFI64;
     for var i = 0; i < 20; ++i do
-        sh_pqueue.head.next[i] = &sh_pqueue.tail;
-        sh_pqueue.tail.next[i] = nil;
+        shavit_lotan_pqueue.head.next[i] = &shavit_lotan_pqueue.tail;
+        shavit_lotan_pqueue.tail.next[i] = nil;
     od
-    return sh_pqueue;
-end
-
-/** Return whether the skip list contains the value.
- */
-export
-def sh_pqueue_contains (set *sh_pqueue, x i64) -> bool
-begin
-    // FIXME: Nir's book does this differently.  Figure out whether this
-    // still works and maybe replace.
-    var node = &set.head;
-    for var level = 19; level >= 0; --level do
-        var next = unmark(node.next[level]);
-        while next.val <= x do
-            node = next;
-            next = unmark(node.next[level]);
-        od
-        if node.val == x then
-            if !is_marked(node.next[0]) then return node.state == ACTIVE; fi
-            return false;
-        fi
-    od
-    return false;
+    return shavit_lotan_pqueue;
 end
 
 /** Add a node, lock-free, to the skiplist.
  */
 export
-def sh_pqueue_add (seed *u64, set *sh_pqueue, x i64) -> bool
+def shavit_lotan_pqueue_add (seed *u64, set *shavit_lotan_pqueue, x i64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -101,7 +79,7 @@ begin
                 delete node;
                 continue;
             fi
-            for var i = 1; i < toplevel; ++i do
+            for var i = 1; i <= toplevel; ++i do
                 while true do
                     pred = preds[i];
                     succ = succs[i];
@@ -119,7 +97,7 @@ end
 /** Remove a node, lock-free, from the skiplist.
  */
 export
-def sh_pqueue_remove (set *sh_pqueue, x i64) -> bool
+def shavit_lotan_pqueue_remove (set *shavit_lotan_pqueue, x i64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -166,7 +144,7 @@ end
 /** Remove a node, lock-free, from the skiplist.  Leak the memory.
  */
 export
-def sh_pqueue_leaky_remove (set *sh_pqueue, x i64) -> bool
+def shavit_lotan_pqueue_leaky_remove (set *shavit_lotan_pqueue, x i64) -> bool
 begin
     var preds [20]*node;
     var succs [20]*node;
@@ -212,17 +190,18 @@ end
  *  Leak the memory.
  */
 export
-def sh_pqueue_leaky_pop_min (set *sh_pqueue) -> bool
+def shavit_lotan_pqueue_leaky_pop_min (set *shavit_lotan_pqueue) -> bool
 begin
-    var curr = set.head.next[0];
-    for var curr = set.head.next[0]; curr != &set.tail; curr = curr.next[0] do
+    for var curr = unmark(set.head.next[0]); 
+        curr != &set.tail;
+        curr = unmark(curr.next[0]) do
         if curr.state == DELETED then
             continue;
         fi
         var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
         if res then 
             // Physically delete the node now.
-            return sh_pqueue_leaky_remove(set, curr.val);
+            return shavit_lotan_pqueue_leaky_remove(set, curr.val);
         fi
     od
     return false;
@@ -232,17 +211,18 @@ end
  *  Don't leak the memory.
  */
 export
-def sh_pqueue_pop_min (set *sh_pqueue) -> bool
+def shavit_lotan_pqueue_pop_min (set *shavit_lotan_pqueue) -> bool
 begin
-    var curr = set.head.next[0];
-    for var curr = set.head.next[0]; curr != &set.tail; curr = curr.next[0] do
+    for var curr = unmark(set.head.next[0]);
+        curr != &set.tail;
+        curr = unmark(curr).next[0] do
         if curr.state == DELETED then
             continue;
         fi
         var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
         if res then 
             // Physically delete the node now.
-            return sh_pqueue_remove(set, curr.val);
+            return shavit_lotan_pqueue_remove(set, curr.val);
         fi
     od
     return false;
@@ -270,7 +250,7 @@ begin
     return level - 1;
 end
 
-def find (set *sh_pqueue,
+def find (set *shavit_lotan_pqueue,
           key i64,
           preds [20]*node,
           succs [20]*node) -> bool

@@ -6,13 +6,14 @@ import "time.h";
 import "stdlib.h";
 
 // Set data structures:
-import "def_bt_lf.defi";
-import "def_bt_tx.defi";
+import "bt_lf.defi";
+import "bt_tx.defi";
 import "fhsl_lf.defi";
 import "fhsl_b.defi";
 import "fhsl_tx.defi";
 import "stacktrack/skip-list.h";
-import "bt_lf.h";
+import "c_bt_lf.h";
+import "c_fhsl_lf.h";
 
 typedef benchmark_t = enum
     | FHSL_LF

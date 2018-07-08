@@ -94,7 +94,7 @@ begin
                 delete node;
                 continue;
             fi
-            for var i = 1; i < toplevel; ++i do
+            for var i = 1; i <= toplevel; ++i do
                 while true do
                     pred = preds[i];
                     succ = succs[i];
