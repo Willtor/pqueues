@@ -200,7 +200,7 @@ int c_spray_pqueue_add(uint64_t *seed, c_spray_pqueue_t *set, int64_t key) {
   while(true) {
     if(find(set, key, preds, succs)) {
       if(node != NULL) {
-        forkscan_free(node);
+        forkscan_free((void*)node);
       }
       return false;
     }

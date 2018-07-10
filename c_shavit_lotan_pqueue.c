@@ -136,7 +136,7 @@ int c_shavit_lotan_pqueue_add(uint64_t *seed, c_shavit_lotan_pqueue_t * set, int
   while(true) {
     if(find(set, key, preds, succs)) {
       if(node != NULL) {
-        forkscan_free(node);
+        forkscan_free((void*)node);
       }
       return false;
     }
