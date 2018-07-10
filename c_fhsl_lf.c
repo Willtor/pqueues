@@ -152,7 +152,7 @@ int c_fhsl_lf_add(uint64_t *seed, c_fhsl_lf_t * set, int64_t key) {
   while(true) {
     if(find(set, key, preds, succs)) {
       if(node != NULL) {
-        forkscan_free(node);
+        forkscan_free((void*)node);
       }
       return false;
     }
