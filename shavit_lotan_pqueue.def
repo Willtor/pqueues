@@ -192,19 +192,23 @@ end
 export
 def shavit_lotan_pqueue_leaky_pop_min (set *shavit_lotan_pqueue) -> bool
 begin
-    for var curr = unmark(set.head.next[0]); 
-        curr != &set.tail;
-        curr = unmark(curr.next[0]) do
-        if curr.state == DELETED then
-            continue;
+    while true do
+        var curr = unmark(set.head.next[0]);
+        if curr == &set.tail then
+            return false;
         fi
-        var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
-        if res then 
-            // Physically delete the node now.
-            return shavit_lotan_pqueue_leaky_remove(set, curr.val);
-        fi
+        // FIXME: If "curr" from outside is used the code doesn't work.
+        for var curr = unmark(set.head.next[0]); curr != &set.tail; curr = unmark(curr.next[0]) do
+            if curr.state == DELETED then
+                continue;
+            fi
+            var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
+            if res then 
+                // Physically delete the node now.
+                return shavit_lotan_pqueue_leaky_remove(set, curr.val);
+            fi
+        od
     od
-    return false;
 end
 
 /** Pop the front node from the list.  Return true iff there was a node to pop.
@@ -213,19 +217,23 @@ end
 export
 def shavit_lotan_pqueue_pop_min (set *shavit_lotan_pqueue) -> bool
 begin
-    for var curr = unmark(set.head.next[0]);
-        curr != &set.tail;
-        curr = unmark(curr).next[0] do
-        if curr.state == DELETED then
-            continue;
+    while true do
+        var curr = unmark(set.head.next[0]);
+        if curr == &set.tail then
+            return false;
         fi
-        var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
-        if res then 
-            // Physically delete the node now.
-            return shavit_lotan_pqueue_remove(set, curr.val);
-        fi
+        // FIXME: If "curr" from outside is used the code doesn't work.
+        for var curr = unmark(set.head.next[0]); curr != &set.tail; curr = unmark(curr.next[0]) do
+            if curr.state == DELETED then
+                continue;
+            fi
+            var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
+            if res then 
+                // Physically delete the node now.
+                return shavit_lotan_pqueue_remove(set, curr.val);
+            fi
+        od
     od
-    return false;
 end
 
 def fast_rand (seed *u64) -> u64

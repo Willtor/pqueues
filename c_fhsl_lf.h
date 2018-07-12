@@ -7,10 +7,10 @@
 typedef struct _fhsl_lf_node_t {
   int64_t key;
   int32_t toplevel;
-  volatile struct _fhsl_lf_node_t * next[N];
+  struct _fhsl_lf_node_t volatile * volatile next[N];
 } fhsl_lf_node_t;
 
-typedef volatile fhsl_lf_node_t * fhsl_lf_node_ptr;
+typedef fhsl_lf_node_t volatile * volatile fhsl_lf_node_ptr;
 
 typedef struct _fhsl_lf_t {
   fhsl_lf_node_t head, tail;

@@ -273,12 +273,17 @@ int c_spray_pqueue_leaky_pop_min(uint64_t *seed, c_spray_pqueue_t *set) {
     if(cleaner) {
       // TODO: Shouldn't scan the whole list.
       // Just the max length of the spray.
+      size_t dist = 0, limit = set->config.padding_amount * set->config.padding_amount;
+      limit = limit < 5 ? 5 : limit;
       for(c_spray_pqueue_node_ptr curr =
         c_spray_pqueue_node_unmark(set->head.next[0]);
         curr != &set->tail;
-        curr = c_spray_pqueue_node_unmark(curr->next[0])){
+        curr = c_spray_pqueue_node_unmark(curr->next[0]), dist++){
         if(curr->state == DELETED) {
           c_spray_pqueue_remove_leaky(set, curr->key);
+        }
+        if(dist == limit) {
+          break;
         }
       }
       //c_spray_pqueue_print(set);

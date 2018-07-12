@@ -203,16 +203,18 @@ int c_shavit_lotan_pqueue_remove_leaky(c_shavit_lotan_pqueue_t * set, int64_t ke
 /** Remove the minimum element in the Shavit Lotan priority queue.
  */
 int c_shavit_lotan_pqueue_leaky_pop_min(c_shavit_lotan_pqueue_t * set) {
-
-  for(c_shavit_lotan_pq_node_ptr curr = sl_pqueue_node_unmark(set->head.next[0]);
-    curr != &set->tail;
-    curr = sl_pqueue_node_unmark(curr->next[0])) {
-    if(curr->deleted) {
-      continue;
+  while(true) {
+    c_shavit_lotan_pq_node_ptr curr = sl_pqueue_node_unmark(set->head.next[0]);
+    if(curr == &set->tail) {
+      return false;
     }
-    if(__sync_bool_compare_and_swap(&curr->deleted, false, true)){
-      return c_shavit_lotan_pqueue_remove_leaky(set, curr->key);
+    for(; curr != &set->tail; curr = sl_pqueue_node_unmark(curr->next[0])) {
+      if(curr->deleted) {
+        continue;
+      }
+      if(__sync_bool_compare_and_swap(&curr->deleted, false, true)){
+        return c_shavit_lotan_pqueue_remove_leaky(set, curr->key);
+      }
     }
   }
-  return false;
 }

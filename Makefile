@@ -23,7 +23,7 @@ PQUEUES = \
 	shavit_lotan_pqueue.def \
 	spray_pqueue.def
 
-C_PQS = c_fhsl_lf.c c_shavit_lotan_pqueue.c c_spray_pqueue.c
+C_PQS = c_fhsl_lf.c c_shavit_lotan_pqueue.c c_spray_pqueue.c c_linden_jonsson_pqueue.c
 
 DEFIFILES = $(SETS:.def=.defi) $(PQUEUES:.def=.defi)
 

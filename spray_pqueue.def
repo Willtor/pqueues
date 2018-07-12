@@ -142,7 +142,7 @@ begin
             if !__builtin_cas(&pred.next[0], unmark(succ), node) then
                 continue;
             fi
-            for var i = 1; i < toplevel; ++i do
+            for var i = 1; i <= toplevel; ++i do
                 while true do
                     pred = preds[i];
                     succ = succs[i];
@@ -293,7 +293,7 @@ begin
   while true do
     var cleaner = (fast_rand(seed) % (set.config.thread_count + 1)) == 0;
     if cleaner then
-      for var curr = set.head.next[0]; curr != &set.tail; curr = unmark(curr).next[0] do
+      for var curr = unmark(set.head.next[0]); curr != &set.tail; curr = unmark(curr.next[0]) do
         if curr.state == DELETED then
           spray_pqueue_leaky_remove(set, curr.priority);
         fi
@@ -346,10 +346,10 @@ def spray (seed *u64, set *spray_pqueue_t) -> *node_t
 begin
   var cur_node *node_t = set.padding_head;
   var D = set.config.descend_amount;
-  for var H = set.config.start_height; H > 0; H = H - D do
+  for var H = set.config.start_height; H >= 0; H = H - D do
     var jump = (fast_rand(seed) % set.config.max_jump) + 1;
     while jump > 0 do
-      var next = unmark(cur_node.next[H - 1]);
+      var next = unmark(cur_node.next[H]);
       if next == &set.tail then
         break;
       fi
