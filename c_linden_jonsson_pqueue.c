@@ -134,7 +134,7 @@ int c_linden_jonsson_pqueue_add(uint64_t *seed, c_linden_jonsson_pqueue_t * set,
       !c_linden_jonsson_is_marked(preds[0]->next[0]) &&
       preds[0]->next[0] == succs[0]) {
       if(node != NULL) {
-        forkscan_free(node);
+        forkscan_free((void*)node);
       }
       return false;
     }
@@ -206,7 +206,7 @@ int c_linden_jonsson_pqueue_leaky_pop_min(c_linden_jonsson_pqueue_t * set) {
     if(c_linden_jonsson_unmark(next) == &set->tail) { return false; }
     if(newhead == NULL && cur->insert_state == INSERT_PENDING) {  newhead = cur; }
     if(c_linden_jonsson_is_marked(next)) { continue; }
-    next = __sync_fetch_and_or(&cur->next[0], 1);
+    next = (c_linden_jonsson_node_ptr)__sync_fetch_and_or((uintptr_t*)cur->next[0], (uintptr_t)1);
   } while((cur = c_linden_jonsson_unmark(next)) && c_linden_jonsson_is_marked(next));
   
   assert(!c_linden_jonsson_is_marked(cur));
