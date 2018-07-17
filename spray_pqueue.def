@@ -22,11 +22,11 @@ typedef node_t =
 export opaque
 typedef spray_pqueue_config_t =
     {
-      thread_count u64,
-      start_height u64,
-      max_jump u64,
-      descend_amount u64,
-      padding_amount u64
+      thread_count i64,
+      start_height i64,
+      max_jump i64,
+      descend_amount i64,
+      padding_amount i64
     };
 
 // Strange BUG I found trying to initialise this struct
@@ -39,9 +39,9 @@ begin
   fi
 
   var spray_config spray_pqueue_config_t = {
-    cast(type u64, threads), cast(type u64, log2(threads) + 1),
-    cast(type u64, log2(threads) + 1), 1U64, 
-    threads * cast(type u64, log2(log_arg))
+    cast(type i64, threads), cast(type i64, log2(threads) + 1),
+    cast(type i64, log2(threads) + 1), 1I64, 
+    threads * cast(type i64, log2(log_arg))
   };
   return spray_config;
 end
@@ -60,7 +60,7 @@ typedef spray_pqueue_t =
 export
 def spray_pqueue_print (set *spray_pqueue_t) -> void
 begin
-    printf("HEAD: %lld\n", set.head.priority);
+    printf("HEAD: %lld ", set.head.priority);
     if set.head.state == DELETED then
         printf("DELETED\n");
     elif set.head.state == PADDING then
@@ -74,7 +74,7 @@ begin
             node = unmark(node).next[0];
         else
             node = unmark(node);
-            printf("node[%d]: %lld\n", node.toplevel, node.priority);
+            printf("node[%d]: %lld ", node.toplevel, node.priority);
             if node.state == DELETED then
                 printf("DELETED\n");
             elif node.state == PADDING then
@@ -85,7 +85,14 @@ begin
             node = node.next[0];
         fi
     od
-    printf("TAIL: %lld\n", set.tail.priority);
+    printf("TAIL: %lld ", set.tail.priority);
+    if set.tail.state == DELETED then
+        printf("DELETED\n");
+    elif set.tail.state == PADDING then
+        printf("PADDING\n");
+    else
+        printf("ACTIVE\n");
+    fi
 end
 
 /** Return a new fixed-height skip list.
@@ -256,13 +263,13 @@ export
 def spray_pqueue_pop_min (seed *u64, set *spray_pqueue_t) -> bool
 begin
   while true do
-    var cleaner = (fast_rand(seed) % set.config.thread_count) == 0;
+    var cleaner = (fast_rand(seed) % (set.config.thread_count + 1)) == 0;
     if cleaner then
-      for var curr = set.head.next[0]; curr != &set.tail; curr = curr.next[0] do
-        if curr.state == DELETED then
-          spray_pqueue_remove(set, curr.priority);
-        fi
-      od
+        for var curr = unmark(set.head.next[0]); curr != &set.tail; curr = unmark(curr.next[0]) do
+            if curr.state == DELETED then
+                spray_pqueue_remove(set, curr.priority);
+            fi
+        od
     fi
 
     var empty bool = set.head.next[0] == &set.tail;
@@ -293,16 +300,16 @@ begin
   while true do
     var cleaner = (fast_rand(seed) % (set.config.thread_count + 1)) == 0;
     if cleaner then
-      for var curr = unmark(set.head.next[0]); curr != &set.tail; curr = unmark(curr.next[0]) do
-        if curr.state == DELETED then
-          spray_pqueue_leaky_remove(set, curr.priority);
-        fi
-      od
+        for var curr = unmark(set.head.next[0]); curr != &set.tail; curr = unmark(curr.next[0]) do
+            if curr.state == DELETED then
+                spray_pqueue_leaky_remove(set, curr.priority);
+            fi
+        od
     fi
       
     var empty bool = set.head.next[0] == &set.tail;
     if empty then
-      return false;
+        return false;
     fi
     
     var node = spray(seed, set);
@@ -315,7 +322,7 @@ begin
     var res = __builtin_cas(&node.state, ACTIVE, DELETED);
     // We didn't delete a node from the list.
     if res then
-      return true;
+        return true;
     fi
   od
 end
@@ -350,6 +357,9 @@ begin
     var jump = (fast_rand(seed) % set.config.max_jump) + 1;
     while jump > 0 do
       var next = unmark(cur_node.next[H]);
+      if next == nil then
+        break;
+      fi
       if next == &set.tail then
         break;
       fi
