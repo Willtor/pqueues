@@ -7,6 +7,7 @@ import "stdlib.h";
 
 // Set data structures:
 import "fhsl_lf.defi";
+import "fhsl_tx.defi";
 import "c_fhsl_lf.h";
 import "shavit_lotan_pqueue.defi";
 import "c_shavit_lotan_pqueue.h";
@@ -18,6 +19,7 @@ import "c_linden_jonsson_pqueue.h";
 typedef benchmark_t = enum
     | FHSL_LF
     | C_FHSL_LF
+    | FHSL_TX
     | SPRAY
     | C_SPRAY
     | SL_PQ
@@ -102,6 +104,7 @@ begin
     switch b with
     xcase FHSL_LF: return "fhsl_lf";
     xcase C_FHSL_LF: return "c_fhsl_lf";
+    xcase FHSL_TX: return "fhsl_tx";
     xcase SPRAY: return "spray";
     xcase C_SPRAY: return "c_spray";
     xcase SL_PQ: return "sl_pq";
@@ -132,6 +135,7 @@ begin
     printf("  -b <benchmark>: Set the benchmark. (default = fhsl_lf)\n");
     printf("     * fhsl_lf: Fixed-height skip list; lock-free.\n");
     printf("     * c_fhsl_lf: Fixed-height skip list written in C; lock-free.\n");
+    printf("     * fhsl_tx: Fixed-height skip list; transactional.\n");
     printf("     * sl_pq: Fixed-height skip list Shavit Lotan priority queue written in C; lock-free underneath.\n");
     printf("     * c_sl_pq: Fixed-height skip list Shavit Lotan priority queue written in C; lock-free underneath.\n");
     printf("     * spray: Fixed-height skip list based priority queue; lock-free with spray delete min.\n");
@@ -208,6 +212,7 @@ begin
             switch argv[i] with
             xcase "fhsl_lf": config.benchmark = FHSL_LF;
             xcase "c_fhsl_lf": config.benchmark = C_FHSL_LF;
+            xcase "fhsl_tx": config.benchmark = FHSL_TX;
             xcase "spray": config.benchmark = SPRAY;
             xcase "c_spray": config.benchmark = C_SPRAY;
             xcase "sl_pq": config.benchmark = SL_PQ;
@@ -269,6 +274,7 @@ begin
     xcase { FHSL_LF, POLICY_LEAKY }:
     ocase { FHSL_LF, POLICY_RETIRE }:
     ocase { C_FHSL_LF, POLICY_LEAKY }:
+    ocase { FHSL_TX, POLICY_LEAKY }:
     ocase { SL_PQ, POLICY_LEAKY }:
     ocase { SL_PQ, POLICY_RETIRE }:
     ocase { SPRAY, POLICY_LEAKY }:
@@ -401,6 +407,25 @@ begin
                 stats.remove_attempts++;
                 if policy == POLICY_LEAKY then
                     if c_fhsl_lf_leaky_pop_min(set) == 1 then
+                        stats.remove_successes++;
+                        insert_action = true;
+                    fi
+                fi
+            fi
+/***************************************************************************/
+/*                 fixed-height skip list, transactional                   */
+/***************************************************************************/
+        xcase FHSL_TX:
+            if insert_action then
+                stats.insert_attempts++;
+                if fhsl_tx_add(&seed, set, val) then
+                    stats.insert_successes++;
+                    insert_action = false;
+                fi
+            else // insert_action == false.
+                stats.remove_attempts++;
+                if policy == POLICY_LEAKY then
+                    if fhsl_tx_leaky_pop_min(set) then
                         stats.remove_successes++;
                         insert_action = true;
                     fi
@@ -551,7 +576,7 @@ begin
         var set = fhsl_lf_create();
         for var i = 0; i < config.init_size; ++i do
             var val = fast_rand(seed) % config.upper_bound;
-            if false == fhsl_lf_add(seed, set, val) then
+            if !fhsl_lf_add(seed, set, val) then
                 --i;
             fi
         od
@@ -565,11 +590,20 @@ begin
             fi
         od
         config.set = set;
+    xcase FHSL_TX:
+        var set = fhsl_tx_create();
+        for var i = 0; i < config.init_size; ++i do
+            var val = fast_rand(seed) % config.upper_bound;
+            if !fhsl_tx_add(seed, set, val) then
+                --i;
+            fi
+        od
+        config.set = set;
     xcase SL_PQ:
         var set = shavit_lotan_pqueue_create();
         for var i = 0; i < config.init_size; ++i do
             var val = fast_rand(seed) % config.upper_bound;
-            if false == shavit_lotan_pqueue_add(seed, set, val) then
+            if !shavit_lotan_pqueue_add(seed, set, val) then
                 --i;
             fi
         od
@@ -587,7 +621,7 @@ begin
         var set = spray_pqueue_create(config.thread_count);
         for var i = 0; i < config.init_size; ++i do
             var val = fast_rand(seed) % config.upper_bound;
-            if false == spray_pqueue_add(seed, set, val) then
+            if !spray_pqueue_add(seed, set, val) then
                 --i;
             fi
         od

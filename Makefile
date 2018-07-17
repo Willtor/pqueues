@@ -20,6 +20,7 @@ SETS = \
 
 PQUEUES = \
 	fhsl_lf.def \
+	fhsl_tx.def \
 	shavit_lotan_pqueue.def \
 	spray_pqueue.def \
 	linden_jonsson_pqueue.def

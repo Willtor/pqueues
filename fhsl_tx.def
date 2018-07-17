@@ -142,6 +142,26 @@ begin
     return node != nil;
 end
 
+/** Pop the front node from the list.  Return true iff there was a node to pop.
+ *  Leak the memory.
+ */
+export
+def fhsl_tx_leaky_pop_min (set *fhsl_tx) -> bool
+begin
+    var node_removed *node = nil;
+    xbegin
+        var head_node *node= set.head.next[0];
+        if head_node != &set.tail then
+            node_removed = head_node;
+            for var i = 0; i <= node_removed.toplevel; ++i do
+                set.head.next[i] = node_removed.next[i];
+            od
+        fi
+    xend
+    return node_removed != nil;
+end
+
+
 def fast_rand (seed *u64) -> u64
 begin
     var val = seed[0];
