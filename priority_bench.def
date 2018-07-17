@@ -358,10 +358,10 @@ begin
         // busy-wait.
     od
     var insert_action = (fast_rand(&seed) % 100) < 50;
+    
     while ptd.state[0] == 1 /*STATE_RUN*/ do
         var val i64 = fast_rand(&seed) % config.upper_bound;
         switch bench with
-
 /***************************************************************************/
 /*                    fixed-height skip list, lock free                    */
 /***************************************************************************/
@@ -500,20 +500,16 @@ begin
         xcase LJ_PQ:
             if insert_action then
                 stats.insert_attempts++;
-                printf("ADDING\n");
                 if linden_jonsson_pqueue_add(&seed, set, val) then
                     stats.insert_successes++;
                     insert_action = false;
-                    printf("ADDED\n");
                 fi
             else // insert_action == false.
                 stats.remove_attempts++;
                 if policy == POLICY_LEAKY then
-                    printf("REMOVING\n");
                     if linden_jonsson_pqueue_leaky_pop_min(set) then
                         stats.remove_successes++;
                         insert_action = true;
-                        printf("REMOVED\n");
                     fi
                 fi
             fi
@@ -608,7 +604,7 @@ begin
     xcase LJ_PQ:
         var set = linden_jonsson_pqueue_create(16);
         for var i = 0; i < config.init_size; ++i do
-            var val = fast_rand(seed) % config.upper_bound;
+            var val i64 = fast_rand(seed) % config.upper_bound;
             if !linden_jonsson_pqueue_add(seed, set, val) then
                 --i;
             fi

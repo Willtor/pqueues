@@ -204,7 +204,7 @@ int c_linden_jonsson_pqueue_leaky_pop_min(c_linden_jonsson_pqueue_t * set) {
     offset++;
     next = cur->next[0];
     if(c_linden_jonsson_unmark(next) == &set->tail) { return false; }
-    if(newhead == NULL && cur->insert_state == INSERT_PENDING) {  newhead = cur; }
+    if(newhead == NULL && cur->insert_state == INSERT_PENDING) { newhead = cur; }
     if(c_linden_jonsson_is_marked(next)) { continue; }
     next = (c_linden_jonsson_node_ptr)__sync_fetch_and_or((uintptr_t*)&cur->next[0], (uintptr_t)1);
   } while((cur = c_linden_jonsson_unmark(next)) && c_linden_jonsson_is_marked(next));
