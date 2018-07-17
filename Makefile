@@ -11,7 +11,7 @@ DEFLIBS = -lpthread -lm
 CC = clang
 CFLAGS = $(OPTLEVEL) -mrtm
 
-SETS =		\
+SETS = \
 	fhsl_lf.def	\
 	fhsl_b.def	\
 	fhsl_tx.def \
@@ -21,7 +21,8 @@ SETS =		\
 PQUEUES = \
 	fhsl_lf.def \
 	shavit_lotan_pqueue.def \
-	spray_pqueue.def
+	spray_pqueue.def \
+	linden_jonsson_pqueue.def
 
 C_PQS = c_fhsl_lf.c c_shavit_lotan_pqueue.c c_spray_pqueue.c c_linden_jonsson_pqueue.c
 

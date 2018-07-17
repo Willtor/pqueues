@@ -12,6 +12,7 @@ import "shavit_lotan_pqueue.defi";
 import "c_shavit_lotan_pqueue.h";
 import "spray_pqueue.defi";
 import "c_spray_pqueue.h";
+import "linden_jonsson_pqueue.defi";
 import "c_linden_jonsson_pqueue.h";
 
 typedef benchmark_t = enum
@@ -21,6 +22,7 @@ typedef benchmark_t = enum
     | C_SPRAY
     | SL_PQ
     | C_SL_PQ
+    | LJ_PQ
     | C_LJ_PQ
     ;
 
@@ -104,6 +106,7 @@ begin
     xcase C_SPRAY: return "c_spray";
     xcase SL_PQ: return "sl_pq";
     xcase C_SL_PQ: return "c_sl_pq";
+    xcase LJ_PQ: return "lj_pq";
     xcase C_LJ_PQ: return "c_lj_pq";
     xcase _: return "unknown benchmark";
     esac
@@ -133,6 +136,7 @@ begin
     printf("     * c_sl_pq: Fixed-height skip list Shavit Lotan priority queue written in C; lock-free underneath.\n");
     printf("     * spray: Fixed-height skip list based priority queue; lock-free with spray delete min.\n");
     printf("     * c_spray: Fixed-height skip list based priority queue written in C; lock-free with spray delete min.\n");
+    printf("     * lj_pq: Fixed-height skip list based priority queue; lock-free with Linden Jonsson delete min.\n");
     printf("     * c_lj_pq: Fixed-height skip list based priority queue written in C; lock-free with Linden Jonsson delete min.\n");
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
@@ -208,6 +212,7 @@ begin
             xcase "c_spray": config.benchmark = C_SPRAY;
             xcase "sl_pq": config.benchmark = SL_PQ;
             xcase "c_sl_pq": config.benchmark = C_SL_PQ;
+            xcase "lj_pq": config.benchmark = LJ_PQ;
             xcase "c_lj_pq": config.benchmark = C_LJ_PQ;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
@@ -270,6 +275,7 @@ begin
     ocase { SPRAY, POLICY_RETIRE }:
     ocase { C_SPRAY, POLICY_LEAKY }:
     ocase { C_SL_PQ, POLICY_LEAKY }:
+    ocase { LJ_PQ, POLICY_LEAKY }:
     ocase { C_LJ_PQ, POLICY_LEAKY }:
     xcase _:
         printf("Unsupported configuration:\n");
@@ -489,6 +495,29 @@ begin
                 fi
             fi
 /***************************************************************************/
+/*         Linden Jonsson queue with underlying lock-free skip-list        */
+/***************************************************************************/
+        xcase LJ_PQ:
+            if insert_action then
+                stats.insert_attempts++;
+                printf("ADDING\n");
+                if linden_jonsson_pqueue_add(&seed, set, val) then
+                    stats.insert_successes++;
+                    insert_action = false;
+                    printf("ADDED\n");
+                fi
+            else // insert_action == false.
+                stats.remove_attempts++;
+                if policy == POLICY_LEAKY then
+                    printf("REMOVING\n");
+                    if linden_jonsson_pqueue_leaky_pop_min(set) then
+                        stats.remove_successes++;
+                        insert_action = true;
+                        printf("REMOVED\n");
+                    fi
+                fi
+            fi
+/***************************************************************************/
 /*        C Linden Jonsson queue with underlying lock-free skip-list       */
 /***************************************************************************/
         xcase C_LJ_PQ:
@@ -572,6 +601,15 @@ begin
         for var i = 0; i < config.init_size; ++i do
             var val = fast_rand(seed) % config.upper_bound;
             if 0 == c_spray_pqueue_add(seed, set, val) then
+                --i;
+            fi
+        od
+        config.set = set;
+    xcase LJ_PQ:
+        var set = linden_jonsson_pqueue_create(16);
+        for var i = 0; i < config.init_size; ++i do
+            var val = fast_rand(seed) % config.upper_bound;
+            if !linden_jonsson_pqueue_add(seed, set, val) then
                 --i;
             fi
         od

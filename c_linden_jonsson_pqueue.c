@@ -197,7 +197,7 @@ static void restructure(c_linden_jonsson_pqueue_t *set) {
 int c_linden_jonsson_pqueue_leaky_pop_min(c_linden_jonsson_pqueue_t * set) {
   c_linden_jonsson_node_ptr cur = NULL, next = NULL, newhead = NULL,
     obs_head = NULL;
-  int32_t offset = 0, level = 0;
+  int32_t offset = 0;
   cur = &set->head;
   obs_head = cur->next[0];
   do {
@@ -206,12 +206,10 @@ int c_linden_jonsson_pqueue_leaky_pop_min(c_linden_jonsson_pqueue_t * set) {
     if(c_linden_jonsson_unmark(next) == &set->tail) { return false; }
     if(newhead == NULL && cur->insert_state == INSERT_PENDING) {  newhead = cur; }
     if(c_linden_jonsson_is_marked(next)) { continue; }
-    next = (c_linden_jonsson_node_ptr)__sync_fetch_and_or((uintptr_t*)cur->next[0], (uintptr_t)1);
+    next = (c_linden_jonsson_node_ptr)__sync_fetch_and_or((uintptr_t*)&cur->next[0], (uintptr_t)1);
   } while((cur = c_linden_jonsson_unmark(next)) && c_linden_jonsson_is_marked(next));
   
   assert(!c_linden_jonsson_is_marked(cur));
-
-  // printf("Removing %d\n", cur->key);
 
   if(newhead == NULL) { newhead = cur; }
   if(offset <= set->boundoffset) { return true; }
@@ -221,10 +219,10 @@ int c_linden_jonsson_pqueue_leaky_pop_min(c_linden_jonsson_pqueue_t * set) {
     obs_head, c_linden_jonsson_mark(newhead))) {
     restructure(set);
     cur = c_linden_jonsson_unmark(obs_head);
-    while(cur != c_linden_jonsson_unmark(newhead)) {
-      next = c_linden_jonsson_unmark(cur->next[0]);
-      cur = next;
-    }
+    // while(cur != c_linden_jonsson_unmark(newhead)) {
+    //   next = c_linden_jonsson_unmark(cur->next[0]);
+    //   cur = next;
+    // }
   }
   return true;
 }
