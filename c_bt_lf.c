@@ -251,7 +251,7 @@ int c_bt_lf_remove_leaky(c_bt_lf_t * set, int64_t key) {
     }
 }
 
-int bt_lf_remove_retire(c_bt_lf_t * set, int64_t key) {
+int c_bt_lf_remove_retire(c_bt_lf_t * set, int64_t key) {
     enum REMOVE_STATE mode = INJECTION;
     c_bt_lf_node_ptr leaf = NULL;
     while(true) {
