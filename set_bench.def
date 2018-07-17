@@ -576,23 +576,23 @@ begin
         xcase C_BT_LF:
             if action < read_action then
                 stats.read_attempts++;
-                if 0 != bt_lf_contains(set, val) then
+                if 0 != c_bt_lf_contains(set, val) then
                     stats.read_successes++;
                 fi
             elif action < add_action then
                 stats.insert_attempts++;
-                if 0 != bt_lf_add(set, val) then
+                if 0 != c_bt_lf_add(set, val) then
                     stats.insert_successes++;
                 fi
             else
                 stats.remove_attempts++;
                 switch policy with
                 xcase POLICY_LEAKY:
-                    if 0 != bt_lf_remove_leaky(set, val) then
+                    if 0 != c_bt_lf_remove_leaky(set, val) then
                         stats.remove_successes++;
                     fi
                 xcase POLICY_RETIRE:
-                    if 0 != bt_lf_remove_retire(set, val) then
+                    if 0 != c_bt_lf_remove_retire(set, val) then
                         stats.remove_successes++;
                     fi
                 xcase _:
@@ -740,10 +740,10 @@ begin
         delete st_thread;
         config.set = cast(type *void, set);
     xcase C_BT_LF:
-        var set = bt_lf_create();
+        var set = c_bt_lf_create();
         for var i = 0; i < config.init_size; ++i do
             var val = fast_rand(seed) % config.upper_bound;
-            if 0 == bt_lf_add(set, val) then
+            if 0 == c_bt_lf_add(set, val) then
                 --i;
             fi
         od

@@ -48,7 +48,7 @@ $(PRIORITY_BENCH): $(PRIORITY_OBJ)
 	$(DEF) -o $@ $(DEFFLAGS) $(DEFLIBS) $^
 
 clean:
-	rm -f $(TARGET) *.defi *.o
+	rm -f $(SET_BENCH) $(PRIORITY_BENCH) *.defi *.o
 
 set_bench.o: $(DEFIFILES)
 
