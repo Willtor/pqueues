@@ -1,0 +1,301 @@
+/* Fixed height skiplist: A skiplist implementation with an array of "next"
+ * nodes of fixed height.
+ */
+
+import "stdio.h";
+import "math.h";
+
+
+typedef node_state_t = enum
+    | PADDING
+    | ACTIVE
+    | DELETED
+    ;
+
+typedef node_t =
+    {
+      priority i64,                 // Key.
+      toplevel i32,                 // Height.
+      state node_state_t,
+      next     [20]*node_t          // Follow-list of nodes.
+    };
+
+export opaque
+typedef spray_tx_pqueue_config_t =
+    {
+      thread_count i64,
+      start_height i64,
+      max_jump i64,
+      descend_amount i64,
+      padding_amount i64
+    };
+
+// Strange BUG I found trying to initialise this struct
+export
+def spray_tx_pqueue_config_paper(threads u64) -> spray_tx_pqueue_config_t
+begin
+  var log_arg = threads;
+  if threads == 1 then
+    log_arg = 2;
+  fi
+
+  var spray_tx_config spray_tx_pqueue_config_t = {
+    cast(type i64, threads), cast(type i64, log2(threads) + 1),
+    cast(type i64, log2(threads) + 1), 1I64, 
+    threads * cast(type i64, log2(log_arg))
+  };
+  return spray_tx_config;
+end
+
+export opaque
+typedef spray_tx_pqueue_t =
+    {
+      config spray_tx_pqueue_config_t,
+      padding_head  *node_t,
+      head  node_t,
+      tail  node_t
+    };
+
+/** Print out the contents of the skip list along with node heights.
+ */
+export
+def spray_tx_pqueue_print (set *spray_tx_pqueue_t) -> void
+begin
+    printf("HEAD: %lld ", set.head.priority);
+    if set.head.state == DELETED then
+        printf("DELETED\n");
+    elif set.head.state == PADDING then
+        printf("PADDING\n");
+    else
+        printf("ACTIVE\n");
+    fi
+    var node = set.head.next[0];
+    while unmark(node) != &set.tail do
+        if is_marked(node.next[0]) then
+            node = unmark(node).next[0];
+        else
+            node = unmark(node);
+            printf("node[%d]: %lld ", node.toplevel, node.priority);
+            if node.state == DELETED then
+                printf("DELETED\n");
+            elif node.state == PADDING then
+                printf("PADDING\n");
+            else
+                printf("ACTIVE\n");
+            fi
+            node = node.next[0];
+        fi
+    od
+    printf("TAIL: %lld ", set.tail.priority);
+    if set.tail.state == DELETED then
+        printf("DELETED\n");
+    elif set.tail.state == PADDING then
+        printf("PADDING\n");
+    else
+        printf("ACTIVE\n");
+    fi
+end
+
+/** Return a new fixed-height skip list.
+ */
+export
+def spray_tx_pqueue_create (threads u64) -> *spray_tx_pqueue_t
+begin
+    var config = spray_tx_pqueue_config_paper(threads);
+    var spray_tx_pqueue = new spray_tx_pqueue_t;
+    spray_tx_pqueue.config = config;
+    spray_tx_pqueue.head.priority = 0x8000000000000000I64;
+    spray_tx_pqueue.head.state = PADDING;
+    spray_tx_pqueue.tail.priority = 0x7FFFFFFFFFFFFFFFI64;
+    spray_tx_pqueue.tail.state = PADDING;
+    for var i = 0; i < 20; ++i do
+        spray_tx_pqueue.head.next[i] = &spray_tx_pqueue.tail;
+        spray_tx_pqueue.tail.next[i] = nil;
+    od
+    // Insert dummy nodes
+    spray_tx_pqueue.padding_head = &spray_tx_pqueue.head;
+    for var i = 1; i < config.padding_amount; ++i do
+        var padding_node = new node_t;
+        padding_node.state = PADDING;
+        // Dummy nodes are fully connected.
+        for var j = 0; j < 20; ++j do
+            padding_node.next[j] = spray_tx_pqueue.padding_head;
+        od
+        spray_tx_pqueue.padding_head = padding_node;
+    od
+    return spray_tx_pqueue;
+end
+
+/** Add a node, lock-free, to the priority queue.
+ */
+export
+def spray_tx_pqueue_add (seed *u64, set *spray_tx_pqueue_t, priority i64) -> bool
+begin
+    var preds [20]*node_t;
+    var succs [20]*node_t;
+    var toplevel = random_level(seed, 20);
+    var node = new node_t;
+    var added = false;
+
+    xbegin
+        if !find(set, priority, preds, succs) then
+            node.priority = priority;
+            node.state = ACTIVE;
+            node.toplevel = toplevel;
+            for var i = 0; i <= toplevel; ++i do
+                node.next[i] = succs[i];
+                preds[i].next[i] = node;
+            od
+            added = true;
+        fi
+    xend
+    return added;
+end
+
+/** Remove a node, lock-free, from the skiplist.  Leak the memory.
+ */
+export
+def spray_tx_pqueue_leaky_remove (set *spray_tx_pqueue_t, x i64) -> bool
+begin
+    var preds [20]*node_t;
+    var succs [20]*node_t;
+    var node *node_t = nil;
+
+    if true == find(set, x, preds, succs) then
+        // Found the node.  Remove it.
+        node = succs[0];
+        for var i = 0; i <= node.toplevel; ++i do
+            preds[i].next[i] = node.next[i];
+        od
+    fi
+
+    return node != nil;
+end
+
+
+/** Remove a node, lock-free, from the skiplist.  Leak the memory.
+ */
+export
+def spray_tx_pqueue_leaky_pop_min (seed *u64, set *spray_tx_pqueue_t) -> bool
+begin
+  while true do
+    var cleaner = (fast_rand(seed) % (set.config.thread_count + 1)) == 0;
+    if cleaner then
+        var preds [20]*node_t;
+        xbegin
+            var dist = 0;
+            var limit = 30;
+            for var i = 0; i < 20; i++ do preds[i] = &set.head; od
+            for var curr = set.head.next[0];
+                curr != &set.tail && dist++ < limit;
+                curr = curr.next[0] do
+                if curr.state == DELETED then
+                    for var i = 0; i <= curr.toplevel; i++ do
+                        // If its legal, skip it.
+                        if preds[i].priority < curr.priority then
+                            preds[i].next[i] = curr.next[i];
+                        fi
+                    od
+                else
+                    for var i = 0; i <= curr.toplevel; i++ do
+                        preds[i] = curr;
+                    od
+                fi
+            od
+        xend
+    fi
+
+    var empty = false;
+    var node_found *node_t = nil;
+    xbegin
+        empty = set.head.next[0] == &set.tail;
+        if !empty then
+            var node = spray(seed, set);
+
+            // Spray failed, try again
+            if node.state == ACTIVE then
+                node_found = node;
+                node.state = DELETED;
+            fi
+        else
+            empty = true;
+        fi
+    xend
+    if empty then
+        return false;
+    elif node_found != nil then
+        return true;
+    fi
+  od
+end
+
+def fast_rand (seed *u64) -> u64
+begin
+    var val = seed[0];
+    if val == 0 then val = 1; fi
+
+    val ^= val << 6;
+    val ^= val >> 21;
+    val ^= val << 7;
+
+    seed[0] = val;
+    return val;
+end
+
+def random_level (seed *u64, max u32) -> u32
+begin
+    var level = 1;
+    while fast_rand(seed) % 2 == 0 && level < max do
+        ++level;
+    od
+    return level - 1;
+end
+
+def spray (seed *u64, set *spray_tx_pqueue_t) -> *node_t
+begin
+  var cur_node *node_t = set.padding_head;
+  var D = set.config.descend_amount;
+  for var H = set.config.start_height; H >= 0; H = H - D do
+    var jump = (fast_rand(seed) % set.config.max_jump) + 1;
+    while jump > 0 do
+      var next = unmark(cur_node.next[H]);
+      if next == nil then
+        break;
+      fi
+      if next == &set.tail then
+        break;
+      fi
+      cur_node = next;
+      jump--;
+    od
+  od
+  return cur_node;
+end 
+
+def find (set *spray_tx_pqueue_t, priority i64, preds [20]*node_t, succs [20]*node_t) -> bool
+begin
+    var pred = &set.head;
+    var curr *node_t;
+    for var level = 19; level >= 0; --level do
+        curr = pred.next[level];
+        while curr.priority < priority do
+            pred = curr;
+            curr = curr.next[level];
+        od
+        preds[level] = pred;
+        succs[level] = curr;
+    od
+    return curr.priority == priority;
+end
+
+def ref_and_markbit (ptr *node_t) -> { *node_t, bool } =
+    { unmark(ptr), is_marked(ptr) };
+
+def mark (ptr *node_t) -> *node_t =
+    cast(type *node_t, 0x1I64 | cast(type i64, ptr));
+
+def unmark (ptr *node_t) -> *node_t =
+    cast(type *node_t, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
+
+def is_marked (ptr *node_t) -> bool =
+    cast(type bool, 0x1I64 & cast(type i64, ptr));
