@@ -1,0 +1,343 @@
+import "stdio.h";
+
+// Leaf for t = 2.
+typedef leaf =
+    { n         i32,
+      is_leaf   bool,
+      keys      [3]i64
+    };
+
+// Internal node for t = 2.
+typedef node =
+    { n         i32,
+      is_leaf   bool,
+      keys      [3]i64,
+      children  [4]*node
+    };
+
+/** btree object.
+ */
+export opaque
+typedef serial_btree =
+    { root *node };
+
+def make_leaf () -> *leaf
+begin
+    var leaf = new leaf { n       : 0,
+                          is_leaf : true
+                        };
+    return leaf;
+end
+
+def make_node () -> *node
+begin
+    var node = new node { n       : 0,
+                          is_leaf : false
+                        };
+    return node;
+end
+
+export
+def serial_btree_print (btree *serial_btree) -> void
+begin
+    printf("btree at %p:\n", btree);
+    node_print(btree.root, 1);
+end
+
+def node_print (node *node, depth i32) -> void
+begin
+    for var i = 0; i < depth; ++i do
+        printf("  ");
+    od
+    if node.is_leaf then
+        printf("leaf [n = %d]:", node.n);
+    else
+        printf("node [n = %d]:", node.n);
+    fi
+
+    for var i = 0; i < node.n; ++i do
+        printf(" %lld", node.keys[i]);
+    od
+    printf("\n");
+
+    if !node.is_leaf then
+        for var i = 0; i <= node.n; ++i do
+            node_print(node.children[i], depth + 1);
+        od
+    fi
+end
+
+/** Create an empty btree.
+ */
+export
+def serial_btree_create () -> *serial_btree
+begin
+    var root = cast(type *node, make_leaf());
+    var btree = new serial_btree { root : root };
+    return btree;
+end
+
+def destroy_node (node *node) -> void
+begin
+    if !node.is_leaf then
+        for var i = 0; i <= node.n; ++i do
+            destroy_node(node.children[i]);
+        od
+    fi
+    delete node;
+end
+
+/** Destroy a btree.
+ */
+export
+def serial_btree_destroy (btree *serial_btree) -> void
+begin
+    destroy_node(btree.root);
+    delete btree;
+end
+
+def search_node (node *node, key i64) -> bool
+begin
+    var i i32;
+    for i = 0; i < node.n  && key > node.keys[i]; ++i do
+    od
+    if i < node.n && key == node.keys[i] then
+        return true;
+    elif node.is_leaf then
+        return false;
+    fi
+    return search_node(node.children[i], key);
+end
+
+/** Search a btree for a given key.
+ */
+export
+def serial_btree_contains (btree *serial_btree, key i64) -> bool
+begin
+    return search_node(btree.root, key);
+end
+
+/** Insert a new value into the btree.
+ */
+export
+def serial_btree_insert (btree *serial_btree, key i64) -> void
+begin
+    var root = btree.root;
+    if root.n == /*2t-1=*/3 then
+        var s = make_node();
+        btree.root = s;
+        s.children[0] = root;
+        split_child(s, 0);
+        insert_nonfull(s, key);
+    else
+        insert_nonfull(root, key);
+    fi
+end
+
+def split_child (x *node, i i32) -> void
+begin
+    var z = make_node();
+    var y = x.children[i];
+    z.is_leaf = y.is_leaf;
+    z.n = /*t-1=*/1;
+    for var j = 0; j < /*t-1=*/1; ++j do
+        z.keys[j] = y.keys[j + /*t=*/2];
+    od
+    y.n = /*t-1=*/1;
+    if !y.is_leaf then
+        for var j = 0; j < /*t=*/2; ++j do
+            z.children[j] = y.children[j + /*t=*/2];
+        od
+    fi
+    for var j = x.n; j > i; --j do
+        x.children[j + 1] = x.children[j];
+    od
+    x.children[i + 1] = z;
+    for var j = x.n - 1; j >= i; --j do
+        x.keys[j + 1] = x.keys[j];
+    od
+    x.keys[i] = y.keys[/*t-1*/1];
+    ++x.n;
+end
+
+def insert_nonfull (node *node, key i64) -> void
+begin
+    var i = node.n - 1;
+    if node.is_leaf then
+        while i >= 0 && key < node.keys[i] do
+            node.keys[i + 1] = node.keys[i];
+            --i;
+        od
+        node.keys[i + 1] = key;
+        ++node.n;
+    else
+        while i >= 0 && key < node.keys[i] do
+            --i;
+        od
+        ++i;
+        if node.children[i].n == /*2t-1*/3 then
+            split_child(node, i);
+            if key > node.keys[i] then
+                ++i;
+            fi
+        fi
+        insert_nonfull(node.children[i], key);
+    fi
+end
+
+export
+def serial_btree_remove (btree *serial_btree, key i64) -> bool
+begin
+    if btree.root.n < 1 then
+        return false;
+    fi
+    var removed = remove_key(btree.root, key);
+    if btree.root.n < 1 && !btree.root.is_leaf then
+        // It's possible the root becomes empty of keys, but still has a
+        // populated child.  This can't happen in deep nodes; the root is
+        // a special case.  CLRS [p499].
+        var trash = btree.root;
+        btree.root = trash.children[0];
+        delete trash;
+    fi
+    return removed;
+end
+
+def remove_key (node *node, key i64) -> bool
+begin
+    var i = index_of(node, key);
+
+    // CLRS [p500]: Case 1.
+    if node.is_leaf then
+        if i < node.n && node.keys[i] == key then
+            ++i;
+            while i < node.n do
+                node.keys[i - 1] = node.keys[i];
+                ++i;
+            od
+            --node.n;
+            return true;
+        fi
+        return false;
+    fi
+
+    // CLRS [p500]: Case 2.
+    if i < node.n && node.keys[i] == key then
+
+        // CLRS [p501]: Case 2a.
+        var y = node.children[i];
+        if y.n >= /*t=*/2 then
+            var k_prime = y.keys[y.n - 1];
+            remove_key(y, k_prime);
+            node.keys[i] = k_prime;
+            // node.n didn't change.
+            return true;
+        fi
+
+        // CLRS [p501]: Case 2b.
+        var z = node.children[i + 1];
+        if z.n >= /*t=*/2 then
+            var k_prime = z.keys[0];
+            remove_key(z, k_prime);
+            node.keys[i] = k_prime;
+            // node.n didn't change.
+            return true;
+        fi
+
+        // CLFS [p501]: Case 2c.
+        merge_siblings(node, i);
+        return remove_key(y, key); // true, but tail-recursive.
+    fi
+
+    // CLRS [p501]: Case 3.
+    var child = node.children[i];
+    if child.n < /*t=*/2 then
+
+        // CLRS [p502]: Case 3a.
+        if i > 0 && node.children[i - 1].n >= /*t=*/2 then // Rotate right.
+            var victim = node.children[i - 1];
+            for var j = child.n; j > 0; --j do
+                child.keys[j] = child.keys[j - 1];
+                child.children[j + 1] = child.children[j];
+            od
+            child.keys[0] = node.keys[i - 1];
+            child.children[0] = victim.children[victim.n];
+            ++child.n;
+            node.keys[i - 1] = victim.keys[victim.n - 1];
+            --victim.n;
+        elif i < node.n
+             && node.children[i + 1].n >= /*t=*/2 then // Rotate left.
+            var victim = node.children[i + 1];
+            child.keys[child.n] = node.keys[i];
+            child.children[child.n + 1] = victim.children[0];
+            ++child.n;
+            node.keys[i] = victim.keys[0];
+            for var j = 0; j < victim.n - 1; ++j do
+                victim.keys[j] = victim.keys[j + 1];
+                victim.children[j] = victim.children[j + 1];
+            od
+            victim.children[victim.n - 1] = victim.children[victim.n];
+            --victim.n;
+
+        // CLRS [p502]: Case 3b.
+        else // Merge siblings.  Prefer left.
+            if i > 0 then
+                merge_siblings(node, i - 1);
+            else
+                merge_siblings(node, i);
+            fi
+        fi
+
+    fi
+    i = index_of(node, key); // Find i, again.
+    return remove_key(node.children[i], key);
+end
+
+def merge_siblings (node *node, i i32) -> void
+begin
+    var y = node.children[i];
+    var z = node.children[i + 1];
+
+    y.keys[/*t-1=*/1] = node.keys[i];
+    for var j = 0; j < z.n; ++j do
+        y.keys[j + /*t=*/2] = z.keys[j];
+        y.children[j + /*t=*/2] = z.children[j];
+    od
+    y.children[/*2t-1=*/3] = z.children[/*t-1*/1];
+    y.n = /*2t-1=*/3;
+    ++i;
+    while i < node.n do
+        node.keys[i - 1] = node.keys[i];
+        node.children[i] = node.children[i + 1];
+        ++i;
+    od
+    --node.n;
+
+    delete z;
+end
+
+def index_of (node *node, key i64) -> i32
+begin
+    var i = 0;
+    while i < node.n && node.keys[i] < key do
+        ++i;
+    od
+    return i;
+end
+
+/** Peek at the min value in the btree.  The return value is undefined if
+ *  the btree is empty.
+ */
+export
+def serial_btree_peek_min (btree *serial_btree) -> i64
+begin
+    return peek_min(btree.root);
+end
+
+def peek_min (node *node) -> i64
+begin
+    if node.is_leaf then
+        return node.keys[0];
+    fi
+    return peek_min(node.children[0]);
+end
