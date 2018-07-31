@@ -185,6 +185,9 @@ begin
     fi
 end
 
+/** Remove the specified key from the set.  Return true iff the key was
+ *  present to be removed.
+ */
 export
 def serial_btree_remove (btree *serial_btree, key i64) -> bool
 begin
