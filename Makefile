@@ -24,7 +24,8 @@ PQUEUES = \
 	shavit_lotan_pqueue.def \
 	spray_pqueue.def \
 	spray_tx_pqueue.def \
-	linden_jonsson_pqueue.def
+	linden_jonsson_pqueue.def	\
+	serial_btree.def
 
 C_PQS = c_fhsl_lf.c c_shavit_lotan_pqueue.c c_spray_pqueue.c c_linden_jonsson_pqueue.c
 
