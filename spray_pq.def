@@ -16,11 +16,11 @@ typedef node_t =
       priority i64,                 // Key.
       toplevel i32,                 // Height.
       state volatile node_state_t,
-      next     [20]*node_t          // Follow-list of nodes.
+      next     [20]volatile*volatile node_t          // Follow-list of nodes.
     };
 
 export opaque
-typedef spray_pqueue_config_t =
+typedef spray_pq_config_t =
     {
       thread_count i64,
       start_height i64,
@@ -31,25 +31,25 @@ typedef spray_pqueue_config_t =
 
 // Strange BUG I found trying to initialise this struct
 export
-def spray_pqueue_config_paper(threads u64) -> spray_pqueue_config_t
+def spray_pq_config_paper(threads u64) -> spray_pq_config_t
 begin
   var log_arg = threads;
   if threads == 1 then
     log_arg = 2;
   fi
 
-  var spray_config spray_pqueue_config_t = {
+  var spray_config spray_pq_config_t = {
     cast(type i64, threads), cast(type i64, log2(threads) + 1),
     cast(type i64, log2(threads) + 1), 1I64, 
-    threads * cast(type i64, log2(log_arg))
+    (threads * cast(type i64, log2(log_arg))) / 2
   };
   return spray_config;
 end
 
 export opaque
-typedef spray_pqueue_t =
+typedef spray_pq_t =
     {
-      config spray_pqueue_config_t,
+      config spray_pq_config_t,
       padding_head  *node_t,
       head  node_t,
       tail  node_t
@@ -58,7 +58,7 @@ typedef spray_pqueue_t =
 /** Print out the contents of the skip list along with node heights.
  */
 export
-def spray_pqueue_print (set *spray_pqueue_t) -> void
+def spray_pq_print (set *spray_pq_t) -> void
 begin
     printf("HEAD: %lld ", set.head.priority);
     if set.head.state == DELETED then
@@ -98,10 +98,10 @@ end
 /** Return a new fixed-height skip list.
  */
 export
-def spray_pqueue_create (threads u64) -> *spray_pqueue_t
+def spray_pq_create (threads u64) -> *spray_pq_t
 begin
-    var config = spray_pqueue_config_paper(threads);
-    var spray_pqueue = new spray_pqueue_t;
+    var config = spray_pq_config_paper(threads);
+    var spray_pqueue = new spray_pq_t;
     spray_pqueue.config = config;
     spray_pqueue.head.priority = 0x8000000000000000I64;
     spray_pqueue.head.state = PADDING;
@@ -113,34 +113,44 @@ begin
     od
     // Insert dummy nodes
     spray_pqueue.padding_head = &spray_pqueue.head;
+    printf("PADDING AMOUNT %d\n", config.padding_amount);
+    printf("START HEIGHT %d\n", config.start_height);
+    printf("MAX JUMP %d\n", config.max_jump);
+    printf("DESCEND AMOUNT %d\n", config.descend_amount);
     for var i = 1; i < config.padding_amount; ++i do
         var padding_node = new node_t;
         padding_node.state = PADDING;
+        padding_node.priority = 0x8000000000000000I64; 
         // Dummy nodes are fully connected.
         for var j = 0; j < 20; ++j do
             padding_node.next[j] = spray_pqueue.padding_head;
         od
         spray_pqueue.padding_head = padding_node;
     od
+    spray_pq_print(spray_pqueue);
     return spray_pqueue;
 end
 
 /** Add a node, lock-free, to the priority queue.
  */
 export
-def spray_pqueue_add (seed *u64, set *spray_pqueue_t, priority i64) -> bool
+def spray_pq_add (seed *u64, set *spray_pq_t, priority i64) -> bool
 begin
-    var preds [20]*node_t;
-    var succs [20]*node_t;
+    var preds [20]volatile*volatile node_t;
+    var succs [20]volatile*volatile node_t;
     var toplevel = random_level(seed, 20);
+    var node volatile*volatile node_t = nil;
     while true do
         if find(set, priority, preds, succs) then
+            delete node;
             return false;
         else
-            var node = new node_t;
-            node.priority = priority;
-            node.toplevel = toplevel;
-            node.state = ACTIVE;
+            if node == nil then
+                node = new node_t;
+                node.priority = priority;
+                node.toplevel = toplevel;
+                node.state = ACTIVE;
+            fi
             for var i = 0; i <= toplevel; ++i do
                 node.next[i] = unmark(succs[i]);
             od
@@ -162,17 +172,16 @@ begin
             return true;
         fi
     od
-    return true;
 end
 
 /** Remove a node, lock-free, from the skiplist.
  */
 export
-def spray_pqueue_remove (set *spray_pqueue_t, x i64) -> bool
+def spray_pq_remove (set *spray_pq_t, x i64) -> bool
 begin
-    var preds [20]*node_t;
-    var succs [20]*node_t;
-    var succ *node_t;
+    var preds [20]volatile*volatile node_t;
+    var succs [20]volatile*volatile node_t;
+    var succ volatile*volatile node_t;
     while true do
         if false == find(set, x, preds, succs) then
             return false;
@@ -215,11 +224,11 @@ end
 /** Remove a node, lock-free, from the skiplist.  Leak the memory.
  */
 export
-def spray_pqueue_leaky_remove (set *spray_pqueue_t, x i64) -> bool
+def spray_pq_leaky_remove (set *spray_pq_t, x i64) -> bool
 begin
-    var preds [20]*node_t;
-    var succs [20]*node_t;
-    var succ *node_t;
+    var preds [20]volatile*volatile node_t;
+    var succs [20]volatile*volatile node_t;
+    var succ volatile*volatile node_t;
     while true do
         if false == find(set, x, preds, succs) then
             return false;
@@ -260,24 +269,10 @@ end
 /** Remove a node, lock-free, from the skiplist.
  */
 export
-def spray_pqueue_pop_min (seed *u64, set *spray_pqueue_t) -> bool
+def spray_pq_pop_min (seed *u64, set *spray_pq_t) -> bool
 begin
-  while true do
-    var cleaner = (fast_rand(seed) % (set.config.thread_count + 1)) == 0;
-    if cleaner then
-        for var curr = unmark(set.head.next[0]); curr != &set.tail; curr = unmark(curr.next[0]) do
-            if curr.state == DELETED then
-                spray_pqueue_remove(set, curr.priority);
-            fi
-        od
-    fi
-
-    var empty bool = set.head.next[0] == &set.tail;
-    if empty then
-      return false;
-    fi
-
-    var node = spray(seed, set);
+  
+  for var node = spray(seed, set); node != &set.tail; node = unmark(node.next[0]) do
     
     // Spray failed, try again
     if node.state == PADDING || node.state == DELETED then
@@ -287,44 +282,33 @@ begin
     var res = __builtin_cas(&node.state, ACTIVE, DELETED);
     // We didn't delete a node from the list.
     if res then
+      var removed = spray_pq_leaky_remove(set, node.priority);
+      if removed then retire node; fi
       return true;
     fi
   od
+  return false;
 end
 
 /** Remove a node, lock-free, from the skiplist.  Leak the memory.
  */
 export
-def spray_pqueue_leaky_pop_min (seed *u64, set *spray_pqueue_t) -> bool
-begin
-  while true do
-    var cleaner = (fast_rand(seed) % (set.config.thread_count + 1)) == 0;
-    if cleaner then
-        for var curr = unmark(set.head.next[0]); curr != &set.tail; curr = unmark(curr.next[0]) do
-            if curr.state == DELETED then
-                spray_pqueue_leaky_remove(set, curr.priority);
-            fi
-        od
-    fi
-      
-    var empty bool = set.head.next[0] == &set.tail;
-    if empty then
-        return false;
-    fi
-    
-    var node = spray(seed, set);
+def spray_pq_leaky_pop_min (seed *u64, set *spray_pq_t) -> bool
+begin  
+  for var node = spray(seed, set); node != &set.tail; node = unmark(node.next[0]) do
     
     // Spray failed, try again
     if node.state == PADDING || node.state == DELETED then
-        continue;
+      continue;
     fi
 
     var res = __builtin_cas(&node.state, ACTIVE, DELETED);
     // We didn't delete a node from the list.
     if res then
-        return true;
+      return spray_pq_leaky_remove(set, node.priority);
     fi
   od
+  return false;
 end
 
 def fast_rand (seed *u64) -> u64
@@ -349,18 +333,16 @@ begin
     return level - 1;
 end
 
-def spray (seed *u64, set *spray_pqueue_t) -> *node_t
+def spray (seed *u64, set *spray_pq_t) -> volatile*volatile node_t
 begin
-  var cur_node *node_t = set.padding_head;
+  var tail = &set.tail;
+  var cur_node volatile*volatile node_t = unmark(set.padding_head);
   var D = set.config.descend_amount;
   for var H = set.config.start_height; H >= 0; H = H - D do
-    var jump = (fast_rand(seed) % set.config.max_jump) + 1;
+    var jump i64 = fast_rand(seed) % (set.config.max_jump + 1);
     while jump > 0 do
       var next = unmark(cur_node.next[H]);
-      if next == nil then
-        break;
-      fi
-      if next == &set.tail then
+      if next == nil || next == tail then
         break;
       fi
       cur_node = next;
@@ -370,10 +352,10 @@ begin
   return cur_node;
 end 
 
-def find (set *spray_pqueue_t, priority i64, preds [20]*node_t, succs [20]*node_t) -> bool
+def find (set *spray_pq_t, priority i64, preds [20]volatile*volatile node_t, succs [20]volatile*volatile node_t) -> bool
 begin
     var marked, snip bool;
-    var pred, curr, succ *node_t = nil, nil, nil;
+    var pred, curr, succ volatile*volatile node_t = nil, nil, nil;
 retry:
     while true do
         pred = &set.head;
@@ -401,14 +383,14 @@ retry:
     od
 end
 
-def ref_and_markbit (ptr *node_t) -> { *node_t, bool } =
+def ref_and_markbit (ptr volatile*volatile node_t) -> { volatile*volatile node_t, bool } =
     { unmark(ptr), is_marked(ptr) };
 
-def mark (ptr *node_t) -> *node_t =
-    cast(type *node_t, 0x1I64 | cast(type i64, ptr));
+def mark (ptr volatile*volatile node_t) -> volatile*volatile node_t =
+    cast(type volatile*volatile node_t, 0x1I64 | cast(type i64, ptr));
 
-def unmark (ptr *node_t) -> *node_t =
-    cast(type *node_t, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
+def unmark (ptr volatile*volatile node_t) -> volatile*volatile node_t =
+    cast(type volatile*volatile node_t, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
 
-def is_marked (ptr *node_t) -> bool =
+def is_marked (ptr volatile*volatile node_t) -> bool =
     cast(type bool, 0x1I64 & cast(type i64, ptr));

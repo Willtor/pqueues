@@ -2,27 +2,31 @@ import "forkscan.defi";
 import "malloc.h";
 import "pthread.h";
 import "stdio.h";
-import "time.h";
 import "stdlib.h";
+import "time.h";
+import "thread_pinner.h";
 
 // Set data structures:
-import "bt_lf.defi";
-import "bt_tx.defi";
 import "fhsl_lf.defi";
+import "c_fhsl_lf.h";
 import "fhsl_b.defi";
 import "fhsl_tx.defi";
+import "c_fhsl_tx.h";
 import "stacktrack/skip-list.h";
+import "bt_lf.defi";
+import "bt_tx.defi";
 import "c_bt_lf.h";
-import "c_fhsl_lf.h";
 
 typedef benchmark_t = enum
     | FHSL_LF
     | FHSL_B
     | FHSL_TX
+    | C_FHSL_LF
+    | C_FHSL_TX
     | STACKTRACK
+    | BT_LF
+    | BT_TX
     | C_BT_LF
-    | DEF_BT_LF
-    | DEF_BT_TX
     ;
 
 typedef memory_policy_t = enum
@@ -69,6 +73,13 @@ typedef per_thread_data_t =
         stats          stats_t
     };
 
+typedef init_thread_data_t =
+    {
+        config        *config_t,
+        total_threads i64,
+        id            i64
+    };
+
 /** Return the time in seconds.
  */
 def hires_timer () -> f64
@@ -103,10 +114,12 @@ begin
     xcase FHSL_LF: return "fhsl_lf";
     xcase FHSL_B: return "fhsl_b";
     xcase FHSL_TX: return "fhsl_tx";
+    xcase C_FHSL_LF: return "c_fhsl_lf";
+    xcase C_FHSL_TX: return "c_fhsl_tx";
     xcase STACKTRACK: return "stacktrack";
     xcase C_BT_LF: return "bt_lf";
-    xcase DEF_BT_LF: return "def_bt_lf";
-    xcase DEF_BT_TX: return "def_bt_tx";
+    xcase BT_LF: return "bt_lf";
+    xcase BT_TX: return "bt_tx";
     xcase _: return "unknown benchmark";
     esac
     return "FIXME: need reachability detection after a switch.";
@@ -133,11 +146,12 @@ begin
     printf("  -b <benchmark>: Set the benchmark. (default = fhsl_lf)\n");
     printf("     * fhsl_lf: Fixed-height skip list; lock-free.\n");
     printf("     * fhsl_b: Fixed-height skip list; blocking.\n");
+    printf("     * c_fhsl_lf: Fixed-height skip list; lock-free, written in C.\n");
     printf("     * fhsl_tx: Fixed-height skip list; transactional.\n");
     printf("     * stacktrack: Use the StackTrack skiplist written in C.\n");
-    printf("     * bt_lf: Use the lock-free binary tree written in C.\n");
-    printf("     * def_bt_lf: Use the lock-free binary tree written in DEF.\n");
-    printf("     * def_bt_tx: Use the transactional binary tree written in DEF.\n");
+    printf("     * bt_lf: Use the lock-free binary tree written in DEF.\n");
+    printf("     * bt_tx: Use the transactional binary tree written in DEF.\n");
+    printf("     * c_bt_lf: Use the lock-free binary tree written in C.\n");
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
@@ -211,11 +225,13 @@ begin
             switch argv[i] with
             xcase "fhsl_lf": config.benchmark = FHSL_LF;
             xcase "fhsl_b": config.benchmark = FHSL_B;
+            xcase "c_fhsl_lf": config.benchmark = C_FHSL_LF;
             xcase "fhsl_tx": config.benchmark = FHSL_TX;
+            xcase "c_fhsl_tx": config.benchmark = C_FHSL_TX;
             xcase "stacktrack": config.benchmark = STACKTRACK;
-            xcase "bt_lf": config.benchmark = C_BT_LF;
-            xcase "def_bt_lf": config.benchmark = DEF_BT_LF;
-            xcase "def_bt_tx": config.benchmark = DEF_BT_TX;
+            xcase "bt_lf": config.benchmark = BT_LF;
+            xcase "c_bt_lf": config.benchmark = C_BT_LF;
+            xcase "bt_tx": config.benchmark = BT_TX;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
                 exit(1);
@@ -281,18 +297,20 @@ begin
     ocase { FHSL_LF, POLICY_RETIRE }:
     ocase { FHSL_B, POLICY_LEAKY }:
     ocase { FHSL_B, POLICY_RETIRE }:
+    ocase { C_FHSL_LF, POLICY_LEAKY}:
     ocase { FHSL_TX, POLICY_LEAKY }:
     ocase { FHSL_TX, POLICY_RETIRE }:
+    ocase { C_FHSL_TX, POLICY_LEAKY}:
     ocase { STACKTRACK, POLICY_LEAKY }:
     ocase { STACKTRACK, POLICY_RETIRE }:
     ocase { STACKTRACK, POLICY_HAZARD }:
     ocase { STACKTRACK, POLICY_STACKTRACK }:
     ocase { C_BT_LF, POLICY_LEAKY}:
     ocase { C_BT_LF, POLICY_RETIRE}:
-    ocase { DEF_BT_LF, POLICY_LEAKY}:
-    ocase { DEF_BT_LF, POLICY_RETIRE}:
-    ocase { DEF_BT_TX, POLICY_LEAKY }:
-    ocase { DEF_BT_TX, POLICY_RETIRE }:
+    ocase { BT_LF, POLICY_LEAKY}:
+    ocase { BT_LF, POLICY_RETIRE}:
+    ocase { BT_TX, POLICY_LEAKY }:
+    ocase { BT_TX, POLICY_RETIRE }:
     xcase _:
         printf("Unsupported configuration:\n");
         printf("  benchmark: %s\n  policy: %s\n",
@@ -430,6 +448,33 @@ begin
             fi
 
 /***************************************************************************/
+/*            fixed-height skip list, lock free written in C               */
+/***************************************************************************/
+        xcase C_FHSL_LF:
+            if action < read_action then
+                stats.read_attempts++;
+                if c_fhsl_lf_contains(set, val) == 1 then
+                    stats.read_successes++;
+                fi
+            elif action < add_action then
+                stats.insert_attempts++;
+                if c_fhsl_lf_add(&seed, set, val) == 1 then
+                    stats.insert_successes++;
+                fi
+            else
+                stats.remove_attempts++;
+                switch policy with
+                xcase POLICY_LEAKY:
+                    if c_fhsl_lf_remove_leaky(set, val) == 1 then
+                        stats.remove_successes++;
+                    fi
+                xcase _:
+                    printf("error: unsupported mem policy for benchmark.\n");
+                    exit(1);
+                esac
+            fi
+
+/***************************************************************************/
 /*                     fixed-height skip list, blocking                    */
 /***************************************************************************/
 
@@ -485,6 +530,33 @@ begin
                 else
                     // policy = POLICY_RETIRE
                     if fhsl_tx_remove(set, val) then
+                        stats.remove_successes++;
+                    fi
+                fi
+            fi
+
+/***************************************************************************/
+/*          fixed-height skip list, transactional, written in C            */
+/***************************************************************************/
+
+            // Note: TBD: This is where a nice structural macro would do
+            // nicely.  This is basically the same code as the previous
+            // two cases.  Think about syntax for this kind of thing.
+        xcase C_FHSL_TX:
+            if action < read_action then
+                stats.read_attempts++;
+                if c_fhsl_tx_contains(set, val) then
+                    stats.read_successes++;
+                fi
+            elif action < add_action then
+                stats.insert_attempts++;
+                if c_fhsl_tx_add(&seed, set, val) then
+                    stats.insert_successes++;
+                fi
+            else
+                stats.remove_attempts++;
+                if policy == POLICY_LEAKY then
+                    if c_fhsl_tx_remove_leaky(set, val) then
                         stats.remove_successes++;
                     fi
                 fi
@@ -570,9 +642,33 @@ begin
                     exit(1);
                 esac
             fi
+
+/***************************************************************************/
+/*                   lock-free binary tree written in DEF                  */
+/***************************************************************************/
+        
+        xcase BT_LF:
+            if action < read_action then
+                stats.read_attempts++;
+                if bt_lf_contains(set, val) then
+                    stats.read_successes++;
+                fi
+            elif action < add_action then
+                stats.insert_attempts++;
+                if bt_lf_add(set, val) then
+                    stats.insert_successes++;
+                fi
+            else
+                stats.remove_attempts++;
+                if bt_lf_remove(set, val) then
+                    stats.remove_successes++;
+                fi
+            fi
+
 /***************************************************************************/
 /*                      lock-free binary tree written in C                 */
 /***************************************************************************/
+        
         xcase C_BT_LF:
             if action < read_action then
                 stats.read_attempts++;
@@ -591,68 +687,36 @@ begin
                     if 0 != c_bt_lf_remove_leaky(set, val) then
                         stats.remove_successes++;
                     fi
-                xcase POLICY_RETIRE:
-                    if 0 != c_bt_lf_remove_retire(set, val) then
-                        stats.remove_successes++;
-                    fi
                 xcase _:
                     printf("error: unsupported mem policy for benchmark.\n");
                     exit(1);
                 esac
             fi
-/***************************************************************************/
-/*                   lock-free binary tree written in DEF                  */
-/***************************************************************************/
-        xcase DEF_BT_LF:
-            if action < read_action then
-                stats.read_attempts++;
-                if def_bt_lf_contains(set, val) then
-                    stats.read_successes++;
-                fi
-            elif action < add_action then
-                stats.insert_attempts++;
-                if def_bt_lf_add(set, val) then
-                    stats.insert_successes++;
-                fi
-            else
-                stats.remove_attempts++;
-                switch policy with
-                xcase POLICY_LEAKY:
-                    if def_bt_lf_remove_leaky(set, val) then
-                        stats.remove_successes++;
-                    fi
-                xcase POLICY_RETIRE:
-                    if def_bt_lf_remove_retire(set, val) then
-                        stats.remove_successes++;
-                    fi
-                xcase _:
-                    printf("error: unsupported mem policy for benchmark.\n");
-                    exit(1);
-                esac
-            fi
+
 /***************************************************************************/
 /*                transactional binary tree written in DEF                 */
 /***************************************************************************/
-        xcase DEF_BT_TX:
+        
+        xcase BT_TX:
             if action < read_action then
                 stats.read_attempts++;
-                if def_bt_tx_contains(set, val) then
+                if bt_tx_contains(set, val) then
                     stats.read_successes++;
                 fi
             elif action < add_action then
                 stats.insert_attempts++;
-                if def_bt_tx_add(set, val) then
+                if bt_tx_add(set, val) then
                     stats.insert_successes++;
                 fi
             else
                 stats.remove_attempts++;
                 switch policy with
                 xcase POLICY_LEAKY:
-                   if def_bt_tx_remove_leaky(set, val) then
+                   if bt_tx_remove_leaky(set, val) then
                         stats.remove_successes++;
                     fi
                 xcase POLICY_RETIRE:
-                    if def_bt_tx_remove_retire(set, val) then
+                    if bt_tx_remove_retire(set, val) then
                         stats.remove_successes++;
                     fi
                 xcase _:
@@ -677,99 +741,141 @@ begin
     return nil;
 end
 
-def initialize_set (config *config_t, seed *u64) -> void
+
+def thread_initialise(arg *void) -> *void 
 begin
-    switch config.benchmark with
-    xcase FHSL_LF:
-        var set = fhsl_lf_create();
-        for var i = 0; i < config.init_size; ++i do
-            var val = fast_rand(seed) % config.upper_bound;
-            if false == fhsl_lf_add(seed, set, val) then
-                --i;
-            fi
-        od
-        config.set = set;
-    xcase FHSL_B:
-        var set *fhsl_b = fhsl_b_create();
-        for var i = 0; i < config.init_size; ++i do
-            var val = fast_rand(seed) % config.upper_bound;
-            if false == fhsl_b_add(seed, set, val) then
-                --i;
-            fi
-        od
-        config.set = cast(type *void, set);
-    xcase FHSL_TX:
-        var set = fhsl_tx_create();
-        for var i = 0; i < config.init_size; ++i do
-            var val = fast_rand(seed) % config.upper_bound;
-            if false == fhsl_tx_add(seed, set, val) then
-                --i;
-            fi
-        od
-        config.set = set;
-    xcase STACKTRACK:
-        var set = skiplist_init();
-        var st_thread = new st_thread_t;
-        var local_seed = cast(type i32, seed[0]);
-        ST_thread_init(st_thread, &local_seed, 50, 100);
-        for var i = 0; i < config.init_size; ++i do
-            var val = fast_rand(seed) % config.upper_bound;
+    var thread_data *init_thread_data_t = cast(type *init_thread_data_t, arg);
+    var config *config_t = thread_data.config;
+    var seed u64 = cast(type u64, time(nil)) + thread_data.id;
+    var bound = config.init_size;
+    var thread_slice = bound / thread_data.total_threads;
+    var extra = bound % thread_data.total_threads;
+    var from = thread_slice * thread_data.id;
+    var to = from + thread_slice;
+    if thread_data.id == (thread_data.total_threads - 1) then to += extra; fi
+    var upper_bound = config.upper_bound;
+    
+    var st_thread *st_thread_t = nil;
+    if config.benchmark == STACKTRACK then
+        var st_seed = cast(type i32, seed);
+        st_thread = new st_thread_t;
+        ST_thread_init(st_thread, &st_seed, 50, 100);
+    fi
+
+    var iterations = 0;
+    while from < to do
+        var val i64 = fast_rand(&seed) % upper_bound;
+        var res = false;
+        switch config.benchmark with
+        xcase FHSL_LF:
+            res = fhsl_lf_add(&seed, config.set, val);
+        xcase C_FHSL_LF:
+            res = c_fhsl_lf_add(&seed, config.set, val);
+        xcase FHSL_B:
+            res = fhsl_b_add(&seed, config.set, val);
+        xcase FHSL_TX:
+            res = fhsl_tx_add(&seed, config.set, val);
+        xcase C_FHSL_TX:
+            res = c_fhsl_tx_add(&seed, config.set, val);
+        xcase C_FHSL_LF:
+            res = c_fhsl_lf_add(&seed, config.set, val) == 1;
+        xcase STACKTRACK:
             switch config.policy with
             xcase POLICY_LEAKY:
-                if nil == skiplist_insert_pure(st_thread, set, val) then
-                    --i;
-                fi
+                res = nil == skiplist_insert_pure(st_thread, config.set, val);
             xcase POLICY_RETIRE:
-                if nil == skiplist_insert_forkscan(st_thread, set, val) then
-                    --i;
-                fi
+                res = nil == skiplist_insert_forkscan(st_thread, config.set, val);
             xcase POLICY_HAZARD:
-                if nil == skiplist_insert_hp(st_thread, set, val) then
-                    --i;
-                fi
+                res = nil == skiplist_insert_hp(st_thread, config.set, val);
             xcase POLICY_STACKTRACK:
-                if nil == skiplist_insert_stacktrack(st_thread, set, val) then
-                    --i;
-                fi
+                res = nil == skiplist_insert_stacktrack(st_thread, config.set, val);
             xcase _:
                 printf("error: unsupported mem policy for stacktrack.");
                 exit(1);
             esac
-        od
+        xcase BT_LF:
+            res = bt_lf_add(config.set, val);
+        xcase BT_TX:
+            res = bt_tx_add(config.set, val);
+        xcase C_BT_LF:
+            res = c_bt_lf_add(config.set, val) == 1;
+        xcase _:
+            printf("error: unable to initialize unknown set.\n");
+        esac
+        if res then
+            from++;
+        fi
+    od
+    
+    if config.benchmark == STACKTRACK then
         ST_thread_finish(st_thread);
         delete st_thread;
-        config.set = cast(type *void, set);
+    fi
+
+    return nil;
+end
+
+def initialize_structure(config *config_t, seed *u64) -> void
+begin
+    switch config.benchmark with
+    xcase FHSL_LF:
+        config.set = fhsl_lf_create();
+    xcase FHSL_B:
+        config.set = fhsl_b_create();
+    xcase FHSL_TX:
+        config.set = fhsl_tx_create();
+    xcase C_FHSL_TX:
+        config.set = c_fhsl_tx_create();
+    xcase C_FHSL_LF:
+        config.set = c_fhsl_lf_create();
+    xcase STACKTRACK:
+        config.set = skiplist_init();
+    xcase BT_LF:
+        switch config.policy with
+        xcase POLICY_LEAKY:
+            config.set = bt_lf_create(true);
+        xcase POLICY_RETIRE:
+            config.set = bt_lf_create(false);
+        xcase _:
+            printf("error: unsupported mem policy for benchmark.\n");
+            exit(1);
+        esac
+    xcase BT_TX:
+        config.set = bt_tx_create();
     xcase C_BT_LF:
-        var set = c_bt_lf_create();
-        for var i = 0; i < config.init_size; ++i do
-            var val = fast_rand(seed) % config.upper_bound;
-            if 0 == c_bt_lf_add(set, val) then
-                --i;
-            fi
-        od
-        config.set = set;
-    xcase DEF_BT_LF:
-        var set = def_bt_lf_create();
-        for var i = 0; i < config.init_size; ++i do
-            var val = fast_rand(seed) % config.upper_bound;
-            if false == def_bt_lf_add(set, val) then
-                --i;
-            fi 
-        od
-        config.set = set;
-    xcase DEF_BT_TX:
-        var set *bt_tx_t = def_bt_tx_create();
-        for var i = 0; i < config.init_size; ++i do
-            var val = fast_rand(seed) % config.upper_bound;
-            if false == def_bt_tx_add(set, val) then
-                --i;
-            fi 
-        od
-        config.set = set;
+        config.set = c_bt_lf_create();
     xcase _:
         printf("error: unable to initialize unknown set.\n");
         exit(1);
     esac
+    
+    var num_threads = get_num_cores();
+    // Let's not totally flood this thing...
+    if num_threads > 16 then
+        num_threads = 16;
+    fi
+    printf("Init threads %ld\n", num_threads);
+    var thread_data *init_thread_data_t = new [num_threads]init_thread_data_t;
+    var tids *pthread_t = new [num_threads]pthread_t;
+    for var i = 0; i < num_threads; ++i do
+        thread_data[i] = {config, num_threads, i};
+        var ret = pthread_create(&tids[i], nil, thread_initialise, &thread_data[i]);
+        if ret != 0 then
+            printf("error: failed to create thread id: %d\n", i);
+            exit(1);
+        fi
+    od
+    printf("joining initialisation threads...\n");
+    for var i = 0; i < num_threads; ++i do
+        var ret = pthread_join(tids[i], nil);
+        if ret != 0 then
+            printf("error: failed to join thread id: %d\n", i);
+            exit(1);
+        fi
+    od
+    printf("initialisation threads joined\n");
+    delete thread_data;
+    delete tids;
 end
 
 export
@@ -785,7 +891,8 @@ begin
     print_config(&config);
 
     printf("Initializing set.\n");
-    initialize_set(&config, &seed);
+    //initialize_set(&config, &seed);
+    initialize_structure(&config, &seed);
 
     printf("Starting threads.\n");
     var tids *pthread_t = new [config.thread_count]pthread_t;

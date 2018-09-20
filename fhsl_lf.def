@@ -4,10 +4,12 @@
 
 import "stdio.h";
 
+typedef node_ptr = volatile*volatile node;
+
 typedef node =
     { val      i64,            // Value.
       toplevel i32,            // Height.
-      next     [20]*node       // Follow-list of nodes.
+      next     [20]node_ptr    // Follow-list of nodes.
     };
 
 export opaque
@@ -55,7 +57,7 @@ def fhsl_lf_contains (set *fhsl_lf, x i64) -> bool
 begin
     // FIXME: Nir's book does this differently.  Figure out whether this
     // still works and maybe replace.
-    var node = &set.head;
+    var node node_ptr = &set.head;
     for var level = 19; level >= 0; --level do
         var next = unmark(node.next[level]);
         while next.val <= x do
@@ -75,37 +77,39 @@ end
 export
 def fhsl_lf_add (seed *u64, set *fhsl_lf, x i64) -> bool
 begin
-    var preds [20]*node;
-    var succs [20]*node;
+    var preds [20]node_ptr;
+    var succs [20]node_ptr;
     var toplevel = random_level(seed, 20);
+    var node node_ptr = nil;
     while true do
-        if true == find(set, x, preds, succs) then
+        if find(set, x, preds, succs) then
+            delete node;
             return false;
-        else
-            var node = new node;
+        fi
+        if node == nil then
+            node = new node;
             node.val = x;
             node.toplevel = toplevel;
-            for var i = 0; i <= toplevel; ++i do
-                node.next[i] = unmark(succs[i]);
-            od
-            var pred = preds[0];
-            var succ = succs[0];
-            if !__builtin_cas(&pred.next[0], unmark(succ), node) then
-                delete node;
-                continue;
-            fi
-            for var i = 1; i <= toplevel; ++i do
-                while true do
-                    pred = preds[i];
-                    succ = succs[i];
-                    if __builtin_cas(&pred.next[i], unmark(succ), node) then
-                        break;
-                    fi
-                    find(set, x, preds, succs);
-                od
-            od
-            return true;
         fi
+        for var i = 0; i <= toplevel; ++i do
+            node.next[i] = unmark(succs[i]);
+        od
+        var pred = preds[0];
+        var succ = succs[0];
+        if !__builtin_cas(&pred.next[0], unmark(succ), node) then
+            continue;
+        fi
+        for var i = 1; i <= toplevel; ++i do
+            while true do
+                pred = preds[i];
+                succ = succs[i];
+                if __builtin_cas(&pred.next[i], unmark(succ), node) then
+                    break;
+                fi
+                find(set, x, preds, succs);
+            od
+        od
+        return true;
     od
 end
 
@@ -114,9 +118,9 @@ end
 export
 def fhsl_lf_remove (set *fhsl_lf, x i64) -> bool
 begin
-    var preds [20]*node;
-    var succs [20]*node;
-    var succ *node;
+    var preds [20]node_ptr;
+    var succs [20]node_ptr;
+    var succ node_ptr;
     while true do
         if false == find(set, x, preds, succs) then
             return false;
@@ -145,7 +149,7 @@ begin
                 marked = is_marked(succ);
                 if i_marked_it then
                     // FIXME: succs[0]?  Should retire node_to_remove?
-                    retire succs[0];
+                    retire node_to_remove;
                     find(set, x, preds, succs);
                     return true;
                 elif marked then
@@ -161,9 +165,9 @@ end
 export
 def fhsl_lf_leaky_remove (set *fhsl_lf, x i64) -> bool
 begin
-    var preds [20]*node;
-    var succs [20]*node;
-    var succ *node;
+    var preds [20]node_ptr;
+    var succs [20]node_ptr;
+    var succ node_ptr;
     while true do
         if false == find(set, x, preds, succs) then
             return false;
@@ -207,9 +211,9 @@ end
 export
 def fhsl_lf_leaky_pop_min (set *fhsl_lf) -> bool
 begin
-    var preds [20]*node;
-    var succs [20]*node;
-    var succ *node;
+    var preds [20]node_ptr;
+    var succs [20]node_ptr;
+    var succ node_ptr;
 
     while true do
         var node_to_remove = set.head.next[0];
@@ -251,9 +255,9 @@ end
 export
 def fhsl_lf_pop_min (set *fhsl_lf) -> bool
 begin
-    var preds [20]*node;
-    var succs [20]*node;
-    var succ *node;
+    var preds [20]node_ptr;
+    var succs [20]node_ptr;
+    var succ node_ptr;
 
     while true do
         var node_to_remove = set.head.next[0];
@@ -313,11 +317,11 @@ end
 
 def find (set *fhsl_lf,
           key i64,
-          preds [20]*node,
-          succs [20]*node) -> bool
+          preds [20]node_ptr,
+          succs [20]node_ptr) -> bool
 begin
     var marked, snip bool;
-    var pred, curr, succ *node = nil, nil, nil;
+    var pred, curr, succ node_ptr = nil, nil, nil;
 retry:
     while true do
         pred = &set.head;
@@ -345,14 +349,14 @@ retry:
     od
 end
 
-def ref_and_markbit (ptr *node) -> { *node, bool } =
+def ref_and_markbit (ptr node_ptr) -> { node_ptr, bool } =
     { unmark(ptr), is_marked(ptr) };
 
-def mark (ptr *node) -> *node =
-    cast(type *node, 0x1I64 | cast(type i64, ptr));
+def mark (ptr node_ptr) -> node_ptr =
+    cast(type node_ptr, 0x1I64 | cast(type i64, ptr));
 
-def unmark (ptr *node) -> *node =
-    cast(type *node, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
+def unmark (ptr node_ptr) -> node_ptr =
+    cast(type node_ptr, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
 
-def is_marked (ptr *node) -> bool =
+def is_marked (ptr node_ptr) -> bool =
     cast(type bool, 0x1I64 & cast(type i64, ptr));

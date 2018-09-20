@@ -3,20 +3,23 @@
 */
 
 import "stddef.h";
+import "stdio.h";
+import "utils.h";
 
-typedef bt_lf_node_t = {
+typedef node_t = {
     key i64,
     // Marked pointers
-    left volatile * volatile bt_lf_node_t,
-    right volatile * volatile bt_lf_node_t
+    left volatile * volatile node_t,
+    right volatile * volatile node_t
 };
 
-typedef bt_lf_node_ptr =  volatile * volatile bt_lf_node_t;
+typedef node_ptr =  volatile * volatile node_t;
 
 export opaque
 typedef bt_lf_t = {
-    R bt_lf_node_ptr,
-    S bt_lf_node_ptr
+    leaky bool,
+    R node_ptr,
+    S node_ptr
 };
 
 typedef remove_state_t = enum
@@ -24,102 +27,103 @@ typedef remove_state_t = enum
     | CLEANUP
     ;
 
-typedef bt_lf_node_unpacked_t = {
+typedef node_unpacked_t = {
     flagged bool, 
     tagged bool,
-    address bt_lf_node_ptr
+    address node_ptr
 };
 
 typedef seek_record_t = {
-    ancestor bt_lf_node_ptr,
-    successor bt_lf_node_ptr,
-    parent bt_lf_node_ptr,
-    leaf bt_lf_node_ptr
+    ancestor node_ptr,
+    successor node_ptr,
+    parent node_ptr,
+    leaf node_ptr
 };
 
-def bt_lf_node_create(key i64) -> *bt_lf_node_t
+def node_create(key i64) -> *node_t
 begin
-    var node *bt_lf_node_t = new bt_lf_node_t;
+    var node *node_t = new node_t;
     node.key = key;
     node.left = nil;
     node.right = nil;
     return node;
 end
 
-def bt_lf_node_address(node bt_lf_node_ptr) -> bt_lf_node_ptr
+def node_address(node node_ptr) -> node_ptr
 begin
-    return cast(type bt_lf_node_ptr, (cast(type size_t, node) >> 2) << 2);
+    return cast(type node_ptr, (cast(type size_t, node) >> 2) << 2);
 end
 
-def bt_lf_node_flag(node bt_lf_node_ptr, flag bool) -> bt_lf_node_ptr
+def node_flag(node node_ptr, flag bool) -> node_ptr
 begin
     if flag then
-        return cast(type bt_lf_node_ptr, cast(type size_t, node) | 0x1);
+        return cast(type node_ptr, cast(type size_t, node) | 0x1);
     else
-        return cast(type bt_lf_node_ptr, (cast(type size_t, node) >> 1) << 1);
+        return cast(type node_ptr, (cast(type size_t, node) >> 1) << 1);
     fi
 end
 
-def bt_lf_node_is_flagged(node bt_lf_node_ptr) -> bool
+def node_is_flagged(node node_ptr) -> bool
 begin
     return (cast(type size_t, node) & 0x1) == 1;
 end
 
-def bt_lf_node_tag(node bt_lf_node_ptr, tag bool) -> bt_lf_node_ptr
+def node_tag(node node_ptr, tag bool) -> node_ptr
 begin
     if tag then
-        return cast(type bt_lf_node_ptr, cast(type size_t, node) | 0x2);
+        return cast(type node_ptr, cast(type size_t, node) | 0x2);
     else
-        var is_flagged = bt_lf_node_is_flagged(node);
-        var new_node = cast(type bt_lf_node_ptr, 
+        var is_flagged = node_is_flagged(node);
+        var new_node = cast(type node_ptr, 
             (cast(type size_t, node) >> 2) << 2);
-        return bt_lf_node_flag(new_node, is_flagged);
+        return node_flag(new_node, is_flagged);
     fi
 end 
 
-def bt_lf_node_is_tagged(node bt_lf_node_ptr) -> bool
+def node_is_tagged(node node_ptr) -> bool
 begin
     return (cast(type size_t, node) & 0x2) == 2;
 end
 
-def bt_lf_node_pack(node bt_lf_node_ptr, flag bool, tag bool) -> bt_lf_node_ptr
+def node_pack(node node_ptr, flag bool, tag bool) -> node_ptr
 begin
-    return bt_lf_node_tag(bt_lf_node_flag(bt_lf_node_address(node), flag), tag);
+    return node_tag(node_flag(node_address(node), flag), tag);
 end
 
-def bt_lf_node_unpack(node bt_lf_node_ptr) -> bt_lf_node_unpacked_t
+def node_unpack(node node_ptr) -> node_unpacked_t
 begin
-    var unpacked_node bt_lf_node_unpacked_t;
-    unpacked_node.flagged = bt_lf_node_is_flagged(node);
-    unpacked_node.tagged = bt_lf_node_is_tagged(node);
-    unpacked_node.address = bt_lf_node_address(node);
+    var unpacked_node node_unpacked_t;
+    unpacked_node.flagged = node_is_flagged(node);
+    unpacked_node.tagged = node_is_tagged(node);
+    unpacked_node.address = node_address(node);
     return unpacked_node;
 end
 
 export
-def def_bt_lf_create() -> *bt_lf_t
+def bt_lf_create(leaky bool) -> *bt_lf_t
 begin
     var bt_lf = new bt_lf_t;
-    bt_lf.R = bt_lf_node_create(0x7FFFFFFFFFFFFFFFI64);
-    bt_lf.S = bt_lf_node_create(0x7FFFFFFFFFFFFFFEI64);
+    bt_lf.leaky = leaky;
+    bt_lf.R = node_create(0x7FFFFFFFFFFFFFFFI64);
+    bt_lf.S = node_create(0x7FFFFFFFFFFFFFFEI64);
     bt_lf.R.left = bt_lf.S;
-    bt_lf.S.left = bt_lf_node_create(0x7FFFFFFFFFFFFFFDI64);
-    bt_lf.S.right = bt_lf_node_create(0x7FFFFFFFFFFFFFFEI64);
+    bt_lf.S.left = node_create(0x7FFFFFFFFFFFFFFDI64);
+    bt_lf.S.right = node_create(0x7FFFFFFFFFFFFFFEI64);
     return bt_lf;
 end
 
-def bt_lf_init_seek_record(bt_lf *bt_lf_t, sr *seek_record_t) -> void
+def init_seek_record(bt_lf *bt_lf_t, sr *seek_record_t) -> void
 begin
     sr.ancestor = bt_lf.R;
     sr.successor = bt_lf.S;
     sr.parent = bt_lf.S;
-    sr.leaf = bt_lf_node_address(bt_lf.S.left);
+    sr.leaf = node_address(bt_lf.S.left);
 end
 
-def bt_lf_node_setup(key i64, sibling_key i64, sibling_node bt_lf_node_ptr) -> bt_lf_node_ptr
+def bt_lf_node_setup(key i64, sibling_key i64, sibling_node node_ptr) -> node_ptr
 begin
-    var node = bt_lf_node_create(key);
-    var internal_node = bt_lf_node_create(key);
+    var node = node_create(key);
+    var internal_node = node_create(key);
     if key < sibling_key then
         internal_node.left = node;
         internal_node.right = sibling_node;
@@ -133,13 +137,13 @@ end
 
 def bt_lf_seek(set *bt_lf_t, sr *seek_record_t, key i64) -> void
 begin
-    bt_lf_init_seek_record(set, sr);
-    var parent_field bt_lf_node_ptr = sr.parent.left;
-    var current_field bt_lf_node_ptr = sr.leaf.left;
-    var current bt_lf_node_ptr = bt_lf_node_address(current_field);
+    init_seek_record(set, sr);
+    var parent_field node_ptr = sr.parent.left;
+    var current_field node_ptr = sr.leaf.left;
+    var current node_ptr = node_address(current_field);
 
     while(current != nil) do
-        if !bt_lf_node_is_tagged(parent_field) then
+        if !node_is_tagged(parent_field) then
             sr.ancestor = sr.parent;
             sr.successor = sr.leaf;
         fi
@@ -151,7 +155,7 @@ begin
         else
             current_field = current.right;
         fi
-        current = bt_lf_node_address(current_field);
+        current = node_address(current_field);
     od
 end
 
@@ -160,16 +164,16 @@ begin
     var ancestor, successor, parent, leaf = sr.ancestor, 
         sr.successor, sr.parent, sr.leaf;
     
-    var successor_address volatile * bt_lf_node_ptr = nil;
+    var successor_address volatile * node_ptr = nil;
     if key < ancestor.key then
         successor_address = &ancestor.left;
     else 
-        successor_address = & ancestor.right;
+        successor_address = &ancestor.right;
     fi
-    var child_val bt_lf_node_ptr = nil;
-    var child_address volatile * bt_lf_node_ptr = nil;
-    var sibling_val bt_lf_node_ptr = nil;
-    var sibling_address volatile * bt_lf_node_ptr  = nil;
+    var child_val node_ptr = nil;
+    var child_address volatile * node_ptr = nil;
+    var sibling_val node_ptr = nil;
+    var sibling_address volatile * node_ptr  = nil;
 
     if key < parent.key then
         child_val = parent.left;
@@ -182,21 +186,25 @@ begin
         sibling_val = parent.left;
         sibling_address = &parent.left;
     fi
-    var unpacked_child bt_lf_node_unpacked_t = bt_lf_node_unpack(child_address[0]);
+    var unpacked_child node_unpacked_t = node_unpack(child_address[0]);
     if !unpacked_child.flagged then
         sibling_val = child_val;
         sibling_address = child_address;
+    fi    
+
+    fetch_and_or(cast(type *u64, sibling_address), 2);
+    var unpacked_sibbling node_unpacked_t = 
+        node_unpack(sibling_address[0]);
+    var res = __builtin_cas(successor_address, node_address(successor),
+        node_flag(unpacked_sibbling.address, unpacked_sibbling.flagged));
+    if !set.leaky && res then
+        retire successor;
     fi
-    __builtin_cas(sibling_address, sibling_val,
-        bt_lf_node_tag(sibling_val, true));
-    var unpacked_sibbling bt_lf_node_unpacked_t = 
-        bt_lf_node_unpack(sibling_address[0]);
-    return __builtin_cas(successor_address, bt_lf_node_address(successor),
-        bt_lf_node_flag(unpacked_sibbling.address, unpacked_sibbling.flagged));
+    return res;
 end
 
 export
-def def_bt_lf_contains(set *bt_lf_t, key i64) -> bool
+def bt_lf_contains(set *bt_lf_t, key i64) -> bool
 begin
     var sr seek_record_t;
     bt_lf_seek(set, &sr, key);
@@ -204,7 +212,7 @@ begin
 end
 
 export
-def def_bt_lf_add(set *bt_lf_t, key i64) -> bool
+def bt_lf_add(set *bt_lf_t, key i64) -> bool
 begin
     while true do
         var sr seek_record_t;
@@ -212,7 +220,7 @@ begin
         var leaf_key = sr.leaf.key;
         if leaf_key != key then
             var parent, leaf = sr.parent, sr.leaf;
-            var child_address volatile *bt_lf_node_ptr = nil;
+            var child_address volatile *node_ptr = nil;
             var parent_key = parent.key;
             if key < parent_key then
                 child_address = &parent.left;
@@ -220,7 +228,7 @@ begin
                 child_address = &parent.right;
             fi
             var internal_node = bt_lf_node_setup(key, leaf_key, leaf);
-            var result = __builtin_cas(child_address, bt_lf_node_address(leaf),
+            var result = __builtin_cas(child_address, node_address(leaf),
                 internal_node);
             if result then
                 return true;
@@ -231,7 +239,7 @@ begin
                     delete internal_node.right;
                 fi
                 delete internal_node;
-                var unpacked_node bt_lf_node_unpacked_t = bt_lf_node_unpack(child_address[0]);
+                var unpacked_node node_unpacked_t = node_unpack(child_address[0]);
                 if unpacked_node.address == leaf && 
                     (unpacked_node.flagged || unpacked_node.tagged) then
                     var done = bt_lf_cleanup(set, &sr, key);
@@ -244,15 +252,15 @@ begin
 end
 
 export
-def def_bt_lf_remove_leaky(set *bt_lf_t, key i64) -> bool
+def bt_lf_remove(set *bt_lf_t, key i64) -> bool
 begin
     var mode = INJECTION;
-    var leaf bt_lf_node_ptr = nil;
+    var leaf node_ptr = nil;
     while true do
         var sr seek_record_t;
         bt_lf_seek(set, &sr, key);
         var parent = sr.parent;
-        var child_address volatile * bt_lf_node_ptr = nil;
+        var child_address volatile * node_ptr = nil;
         if key < parent.key then
             child_address = &parent.left;
         else
@@ -264,15 +272,18 @@ begin
                 return false;
             fi
             var result = __builtin_cas(child_address,
-                bt_lf_node_address(leaf), bt_lf_node_flag(leaf, true));
+                node_address(leaf), node_flag(leaf, true));
             if result then
                 mode = CLEANUP;
                 var done = bt_lf_cleanup(set, &sr, key);
                 if done then
+                    if !set.leaky then
+                        retire(leaf);
+                    fi
                     return true;
                 fi
             else
-                var unpacked_node bt_lf_node_unpacked_t = bt_lf_node_unpack(child_address[0]);
+                var unpacked_node node_unpacked_t = node_unpack(child_address[0]);
                 if unpacked_node.address == leaf &&
                     (unpacked_node.flagged || unpacked_node.tagged) then
                     var done = bt_lf_cleanup(set, &sr, key);
@@ -280,61 +291,16 @@ begin
             fi
         else
             if sr.leaf != leaf then
-                return true;
-            else
-                var done = bt_lf_cleanup(set, &sr, key);
-                if done then 
-                    return true;
-                fi
-            fi
-        fi
-    od
-end
-
-export
-def def_bt_lf_remove_retire(set *bt_lf_t, key i64) -> bool
-begin
-    var mode = INJECTION;
-    var leaf bt_lf_node_ptr = nil;
-    while true do
-        var sr seek_record_t;
-        bt_lf_seek(set, &sr, key);
-        var parent = sr.parent;
-        var child_address volatile * bt_lf_node_ptr = nil;
-        if key < parent.key then
-            child_address = &parent.left;
-        else
-            child_address = &parent.right;
-        fi
-        if mode == INJECTION then
-            leaf = sr.leaf;
-            if leaf.key != key then
-                return false;
-            fi
-            var result = __builtin_cas(child_address,
-                bt_lf_node_address(leaf), bt_lf_node_flag(leaf, true));
-            if result then
-                mode = CLEANUP;
-                var done = bt_lf_cleanup(set, &sr, key);
-                if done then
+                if !set.leaky then
                     retire(leaf);
-                    return true;
                 fi
-            else
-                var unpacked_node bt_lf_node_unpacked_t = bt_lf_node_unpack(child_address[0]);
-                if unpacked_node.address == leaf &&
-                    (unpacked_node.flagged || unpacked_node.tagged) then
-                    var done = bt_lf_cleanup(set, &sr, key);
-                fi
-            fi
-        else
-            if sr.leaf != leaf then
-                retire(leaf);
                 return true;
             else
                 var done = bt_lf_cleanup(set, &sr, key);
                 if done then
-                    retire(leaf);
+                    if !set.leaky then
+                        retire(leaf);
+                    fi
                     return true;
                 fi
             fi

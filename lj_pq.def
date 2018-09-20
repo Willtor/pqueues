@@ -1,0 +1,281 @@
+/* Fixed height skiplist: A skiplist implementation with an array of "next"
+ * nodes of fixed height.
+ */
+
+import "stdio.h";
+import "utils.h";
+
+typedef node_ptr = volatile*volatile node;
+
+typedef insert_state_t = enum
+  | INSERT_PENDING
+  | INSERTED
+  ;
+
+typedef node =
+    { key      i64,            // Value.
+      toplevel i32,            // Height.
+      insert_state volatile insert_state_t,
+      next     [20]node_ptr       // Follow-list of nodes.
+    };
+
+export opaque
+typedef lj_pq_t =
+    {
+        boundoffset u64,
+        head  node,
+        tail  node
+    };
+
+/** Print out the contents of the skip list along with node heights.
+ */
+export
+def lj_pq_print (set *lj_pq_t) -> void
+begin
+    var raw_node = set.head.next[0];
+    while unmark(raw_node) != &set.tail do
+        var node = unmark(raw_node);
+        printf("node[%d]: %lld deleted: %d inserted: %d\n", node.toplevel, node.key,
+            is_marked(raw_node), node.insert_state);
+        raw_node = node.next[0];
+    od
+end
+
+/** Return a new fixed-height skip list.
+ */
+export
+def lj_pq_create (boundoffset u64) -> *lj_pq_t
+begin
+    var queue = new lj_pq_t;
+    queue.boundoffset = boundoffset;
+    queue.head.key = 0x8000000000000000I64;
+    queue.head.insert_state = INSERTED;
+    queue.tail.key = 0x7FFFFFFFFFFFFFFFI64;
+    queue.tail.insert_state = INSERTED;
+    for var i = 0; i < 20; ++i do
+        queue.head.next[i] = &queue.tail;
+        queue.tail.next[i] = nil;
+    od
+    return queue;
+end
+
+def node_create(key i64, toplevel i32) -> node_ptr
+begin
+    var node = new node;
+    node.key = key;
+    node.toplevel = toplevel;
+    node.insert_state = INSERT_PENDING;
+    return node;
+end
+
+def locate_preds(set *lj_pq_t,
+    key i64,
+    preds [20]node_ptr,
+    succs [20]node_ptr
+    ) -> node_ptr
+begin
+  var cur, next, del node_ptr = &set.head, nil, nil;
+  var level i64 = 19;
+  var deleted = false;
+  while level >= 0 do
+    next = cur.next[level];
+    deleted = is_marked(next);
+    next = unmark(next);
+
+    while (next.key < key || 
+      is_marked(next.next[0]) || 
+      ((level == 0) && deleted)) do
+      if level == 0 && deleted then
+        del = next;
+      fi
+      cur = next;
+      next = next.next[level];
+      deleted = is_marked(next);
+      next = unmark(next);
+    od
+    preds[level] = cur;
+    succs[level] = next;
+    level--;
+  od
+  return del;
+end
+
+/** Add a node, lock-free, to the skiplist.
+ */
+export
+def lj_pq_add (seed *u64, set *lj_pq_t, key i64) -> bool
+begin
+  var preds [20]node_ptr;
+  var succs [20]node_ptr;
+  var toplevel = random_level(seed, 20);
+  var node node_ptr = nil;
+  while true do
+    var del node_ptr = locate_preds(set, key, preds, succs);
+    if (succs[0].key == key &&
+      !is_marked(preds[0].next[0]) &&
+      preds[0].next[0] == succs[0]) then
+      if node != nil then
+        delete node;
+      fi
+      return false;
+    fi
+
+    if node == nil then node = node_create(key, toplevel); fi
+    for var i i64 = 0; i <= toplevel; ++i do node.next[i] = succs[i]; od
+    var pred, succ node_ptr = preds[0], succs[0];
+    if !__builtin_cas(&pred.next[0], succ, node) then continue; fi
+
+    for var i i64 = 1; i <= toplevel; i++ do
+
+      if (is_marked(node.next[0]) ||
+        is_marked(succs[i].next[0]) ||
+        del == succs[i]) then
+        node.insert_state = INSERTED;
+        return true;
+      fi
+
+      node.next[i] = succs[i];
+
+      if !__builtin_cas(&preds[i].next[i], succs[i], node) then
+        del = locate_preds(set, key, preds, succs);
+        if succs[0] != node then
+          node.insert_state = INSERTED;
+          return true;
+        fi
+      fi
+    od
+    node.insert_state = INSERTED;
+    return true;
+  od
+end
+
+
+def restructure(set *lj_pq_t) -> void
+begin
+    var pred node_ptr = &set.head;
+    var cur node_ptr = nil;
+    var head node_ptr = nil;
+    var level = 19;
+    while level > 0 do
+        head = set.head.next[level];
+        cur = pred.next[level];
+        if !is_marked(head.next[0]) then
+            level--;
+            continue;
+        fi
+        while is_marked(cur.next[0]) do
+            pred = cur;
+            cur = pred.next[level];
+        od
+        if __builtin_cas(&set.head.next[level], head, cur) then
+            level--;
+        fi
+    od
+end
+
+/** Pop the front node from the list.  Return true iff there was a node to pop.
+ *  Leak the memory.
+ */
+export
+def lj_pq_leaky_pop_min (set *lj_pq_t) -> bool
+begin
+
+    var cur node_ptr = &set.head;
+    var next node_ptr = nil;
+    var newhead node_ptr = nil;
+    var obs_head node_ptr = cur.next[0];
+    var offset i32 = 0;
+
+    do
+        offset++;
+        next = cur.next[0];
+        if unmark(next) == &set.tail then return false; fi
+        if newhead == nil && cur.insert_state == INSERT_PENDING then newhead = cur; fi
+        if is_marked(next) then continue; fi
+        // Yuck
+        next = cast(type node_ptr, fetch_and_or(cast(type *u64, &cur.next[0]), 1));
+    od while (((cur = unmark(next)) != nil) && is_marked(next));
+
+    if newhead == nil then newhead = cur; fi
+    if offset <= set.boundoffset then return true; fi
+    if set.head.next[0] != obs_head then return true; fi
+
+    if __builtin_cas(&set.head.next[0], obs_head, mark(newhead)) then
+        restructure(set);
+    fi
+    return true;
+end
+
+/** Pop the front node from the list.  Return true iff there was a node to pop.
+ *  Leak the memory.
+ */
+export
+def lj_pq_pop_min (set *lj_pq_t) -> bool
+begin
+
+    var cur node_ptr = &set.head;
+    var next node_ptr = nil;
+    var newhead node_ptr = nil;
+    var obs_head node_ptr = cur.next[0];
+    var offset i32 = 0;
+
+    do
+        offset++;
+        next = cur.next[0];
+        if unmark(next) == &set.tail then return false; fi
+        if newhead == nil && cur.insert_state == INSERT_PENDING then newhead = cur; fi
+        if is_marked(next) then continue; fi
+        // Yuck
+        next = cast(type node_ptr, fetch_and_or(cast(type *u64, &cur.next[0]), 1));
+    od while (((cur = unmark(next)) != nil) && is_marked(next));
+
+    if newhead == nil then newhead = cur; fi
+    if offset <= set.boundoffset then return true; fi
+    if set.head.next[0] != obs_head then return true; fi
+
+    if __builtin_cas(&set.head.next[0], obs_head, mark(newhead)) then
+        restructure(set);
+        cur = unmark(obs_head);
+        while cur != unmark(newhead) do
+            next = unmark(cur.next[0]);
+            retire cur;
+            cur = next;
+        od
+    fi
+    return true;
+end
+
+
+def fast_rand (seed *u64) -> u64
+begin
+    var val = seed[0];
+    if val == 0 then val = 1; fi
+
+    val ^= val << 6;
+    val ^= val >> 21;
+    val ^= val << 7;
+
+    seed[0] = val;
+    return val;
+end
+
+def random_level (seed *u64, max u32) -> u32
+begin
+    var level = 1;
+    while fast_rand(seed) % 2 == 0 && level < max do
+        ++level;
+    od
+    return level - 1;
+end
+
+def ref_and_markbit (ptr node_ptr) -> { node_ptr, bool } =
+    { unmark(ptr), is_marked(ptr) };
+
+def mark (ptr node_ptr) -> node_ptr =
+    cast(type node_ptr, 0x1I64 | cast(type i64, ptr));
+
+def unmark (ptr node_ptr) -> node_ptr =
+    cast(type node_ptr, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
+
+def is_marked (ptr node_ptr) -> bool =
+    cast(type bool, 0x1I64 & cast(type i64, ptr));

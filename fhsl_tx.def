@@ -73,7 +73,7 @@ begin
     node.val = x;
     node.toplevel = toplevel;
 
-    xbegin
+    atomic begin
         if false == find(set, x, preds, succs) then
             // Node didn't already exist in the set.  Add it in.
             for var i = 0; i <= toplevel; ++i do
@@ -82,7 +82,7 @@ begin
             od
             added = true;
         fi
-    xend
+    end
 
     if !added then
         // failed to add the node.
@@ -101,7 +101,7 @@ begin
     var succs [20]*node;
     var node *node = nil;
 
-    xbegin
+    atomic begin
         if true == find(set, x, preds, succs) then
             // Found the node.  Remove it.
             node = succs[0];
@@ -109,7 +109,7 @@ begin
                 preds[i].next[i] = node.next[i];
             od
         fi
-    xend
+    end
 
     if node != nil then
         // Removed the node.
@@ -129,7 +129,7 @@ begin
     var succs [20]*node;
     var node *node = nil;
 
-    xbegin
+    atomic begin
         if true == find(set, x, preds, succs) then
             // Found the node.  Remove it.
             node = succs[0];
@@ -137,7 +137,7 @@ begin
                 preds[i].next[i] = node.next[i];
             od
         fi
-    xend
+    end
 
     return node != nil;
 end
@@ -149,7 +149,7 @@ export
 def fhsl_tx_leaky_pop_min (set *fhsl_tx) -> bool
 begin
     var node_removed *node = nil;
-    xbegin
+    atomic begin
         var head_node *node= set.head.next[0];
         if head_node != &set.tail then
             node_removed = head_node;
@@ -157,7 +157,7 @@ begin
                 set.head.next[i] = node_removed.next[i];
             od
         fi
-    xend
+    end
     return node_removed != nil;
 end
 

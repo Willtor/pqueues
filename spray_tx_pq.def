@@ -21,7 +21,7 @@ typedef node_t =
     };
 
 export opaque
-typedef spray_tx_pqueue_config_t =
+typedef spray_tx_pq_config_t =
     {
       thread_count i64,
       start_height i64,
@@ -32,14 +32,14 @@ typedef spray_tx_pqueue_config_t =
 
 // Strange BUG I found trying to initialise this struct
 export
-def spray_tx_pqueue_config_paper(threads u64) -> spray_tx_pqueue_config_t
+def spray_tx_pq_config_paper(threads u64) -> spray_tx_pq_config_t
 begin
   var log_arg = threads;
   if threads == 1 then
     log_arg = 2;
   fi
 
-  var spray_tx_config spray_tx_pqueue_config_t = {
+  var spray_tx_config spray_tx_pq_config_t = {
     cast(type i64, threads), cast(type i64, log2(threads) + 1),
     cast(type i64, log2(threads) + 1), 1I64, 
     threads * cast(type i64, log2(log_arg))
@@ -48,9 +48,9 @@ begin
 end
 
 export opaque
-typedef spray_tx_pqueue_t =
+typedef spray_tx_pq_t =
     {
-      config spray_tx_pqueue_config_t,
+      config spray_tx_pq_config_t,
       padding_head  *node_t,
       head  node_t,
       tail  node_t
@@ -59,7 +59,7 @@ typedef spray_tx_pqueue_t =
 /** Print out the contents of the skip list along with node heights.
  */
 export
-def spray_tx_pqueue_print (set *spray_tx_pqueue_t) -> void
+def spray_tx_pq_print (set *spray_tx_pq_t) -> void
 begin
     printf("HEAD: %lld ", set.head.priority);
     if set.head.state == DELETED then
@@ -99,37 +99,37 @@ end
 /** Return a new fixed-height skip list.
  */
 export
-def spray_tx_pqueue_create (threads u64) -> *spray_tx_pqueue_t
+def spray_tx_pq_create (threads u64) -> *spray_tx_pq_t
 begin
-    var config = spray_tx_pqueue_config_paper(threads);
-    var spray_tx_pqueue = new spray_tx_pqueue_t;
-    spray_tx_pqueue.config = config;
-    spray_tx_pqueue.head.priority = 0x8000000000000000I64;
-    spray_tx_pqueue.head.state = PADDING;
-    spray_tx_pqueue.tail.priority = 0x7FFFFFFFFFFFFFFFI64;
-    spray_tx_pqueue.tail.state = PADDING;
+    var config = spray_tx_pq_config_paper(threads);
+    var spray_tx_pq = new spray_tx_pq_t;
+    spray_tx_pq.config = config;
+    spray_tx_pq.head.priority = 0x8000000000000000I64;
+    spray_tx_pq.head.state = PADDING;
+    spray_tx_pq.tail.priority = 0x7FFFFFFFFFFFFFFFI64;
+    spray_tx_pq.tail.state = PADDING;
     for var i = 0; i < 20; ++i do
-        spray_tx_pqueue.head.next[i] = &spray_tx_pqueue.tail;
-        spray_tx_pqueue.tail.next[i] = nil;
+        spray_tx_pq.head.next[i] = &spray_tx_pq.tail;
+        spray_tx_pq.tail.next[i] = nil;
     od
     // Insert dummy nodes
-    spray_tx_pqueue.padding_head = &spray_tx_pqueue.head;
+    spray_tx_pq.padding_head = &spray_tx_pq.head;
     for var i = 1; i < config.padding_amount; ++i do
         var padding_node = new node_t;
         padding_node.state = PADDING;
         // Dummy nodes are fully connected.
         for var j = 0; j < 20; ++j do
-            padding_node.next[j] = spray_tx_pqueue.padding_head;
+            padding_node.next[j] = spray_tx_pq.padding_head;
         od
-        spray_tx_pqueue.padding_head = padding_node;
+        spray_tx_pq.padding_head = padding_node;
     od
-    return spray_tx_pqueue;
+    return spray_tx_pq;
 end
 
 /** Add a node, lock-free, to the priority queue.
  */
 export
-def spray_tx_pqueue_add (seed *u64, set *spray_tx_pqueue_t, priority i64) -> bool
+def spray_tx_pq_add (seed *u64, set *spray_tx_pq_t, priority i64) -> bool
 begin
     var preds [20]*node_t;
     var succs [20]*node_t;
@@ -137,7 +137,7 @@ begin
     var node = new node_t;
     var added = false;
 
-    xbegin
+    atomic begin
         if !find(set, priority, preds, succs) then
             node.priority = priority;
             node.state = ACTIVE;
@@ -148,14 +148,14 @@ begin
             od
             added = true;
         fi
-    xend
+    end
     return added;
 end
 
 /** Remove a node, lock-free, from the skiplist.  Leak the memory.
  */
 export
-def spray_tx_pqueue_leaky_remove (set *spray_tx_pqueue_t, x i64) -> bool
+def spray_tx_pq_leaky_remove (set *spray_tx_pq_t, x i64) -> bool
 begin
     var preds [20]*node_t;
     var succs [20]*node_t;
@@ -176,13 +176,13 @@ end
 /** Remove a node, lock-free, from the skiplist.  Leak the memory.
  */
 export
-def spray_tx_pqueue_leaky_pop_min (seed *u64, set *spray_tx_pqueue_t) -> bool
+def spray_tx_pq_leaky_pop_min (seed *u64, set *spray_tx_pq_t) -> bool
 begin
   while true do
     var cleaner = (fast_rand(seed) % (set.config.thread_count + 1)) == 0;
     if cleaner then
         var preds [20]*node_t;
-        xbegin
+        atomic begin
             var dist = 0;
             var limit = 30;
             for var i = 0; i < 20; i++ do preds[i] = &set.head; od
@@ -191,7 +191,7 @@ begin
                 curr = curr.next[0] do
                 if curr.state == DELETED then
                     for var i = 0; i <= curr.toplevel; i++ do
-                        // If its legal, skip it.
+                        // If its legal, skip it. (some preds are ahead of curr)
                         if preds[i].priority < curr.priority then
                             preds[i].next[i] = curr.next[i];
                         fi
@@ -202,25 +202,21 @@ begin
                     od
                 fi
             od
-        xend
+        end
     fi
 
     var empty = false;
     var node_found *node_t = nil;
-    xbegin
+    atomic begin
         empty = set.head.next[0] == &set.tail;
         if !empty then
             var node = spray(seed, set);
-
-            // Spray failed, try again
             if node.state == ACTIVE then
                 node_found = node;
                 node.state = DELETED;
             fi
-        else
-            empty = true;
         fi
-    xend
+    end
     if empty then
         return false;
     elif node_found != nil then
@@ -251,7 +247,7 @@ begin
     return level - 1;
 end
 
-def spray (seed *u64, set *spray_tx_pqueue_t) -> *node_t
+def spray (seed *u64, set *spray_tx_pq_t) -> *node_t
 begin
   var cur_node *node_t = set.padding_head;
   var D = set.config.descend_amount;
@@ -272,7 +268,7 @@ begin
   return cur_node;
 end 
 
-def find (set *spray_tx_pqueue_t, priority i64, preds [20]*node_t, succs [20]*node_t) -> bool
+def find (set *spray_tx_pq_t, priority i64, preds [20]*node_t, succs [20]*node_t) -> bool
 begin
     var pred = &set.head;
     var curr *node_t;
