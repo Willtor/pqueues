@@ -30,10 +30,10 @@ typedef lj_pq_t =
 /** Print out the contents of the skip list along with node heights.
  */
 export
-def lj_pq_print (set *lj_pq_t) -> void
+def lj_pq_print (pqueue *lj_pq_t) -> void
 begin
-    var raw_node = set.head.next[0];
-    while unmark(raw_node) != &set.tail do
+    var raw_node = pqueue.head.next[0];
+    while unmark(raw_node) != &pqueue.tail do
         var node = unmark(raw_node);
         printf("node[%d]: %lld deleted: %d inserted: %d\n", node.toplevel, node.key,
             is_marked(raw_node), node.insert_state);
@@ -41,8 +41,6 @@ begin
     od
 end
 
-/** Return a new fixed-height skip list.
- */
 export
 def lj_pq_create (boundoffset u64) -> *lj_pq_t
 begin
@@ -68,13 +66,13 @@ begin
     return node;
 end
 
-def locate_preds(set *lj_pq_t,
+def locate_preds(pqueue *lj_pq_t,
     key i64,
     preds [20]node_ptr,
     succs [20]node_ptr
     ) -> node_ptr
 begin
-  var cur, next, del node_ptr = &set.head, nil, nil;
+  var cur, next, del node_ptr = &pqueue.head, nil, nil;
   var level i64 = 19;
   var deleted = false;
   while level >= 0 do
@@ -100,17 +98,16 @@ begin
   return del;
 end
 
-/** Add a node, lock-free, to the skiplist.
- */
+
 export
-def lj_pq_add (seed *u64, set *lj_pq_t, key i64) -> bool
+def lj_pq_add (seed *u64, pqueue *lj_pq_t, key i64) -> bool
 begin
   var preds [20]node_ptr;
   var succs [20]node_ptr;
   var toplevel = random_level(seed, 20);
   var node node_ptr = nil;
   while true do
-    var del node_ptr = locate_preds(set, key, preds, succs);
+    var del node_ptr = locate_preds(pqueue, key, preds, succs);
     if (succs[0].key == key &&
       !is_marked(preds[0].next[0]) &&
       preds[0].next[0] == succs[0]) then
@@ -137,7 +134,7 @@ begin
       node.next[i] = succs[i];
 
       if !__builtin_cas(&preds[i].next[i], succs[i], node) then
-        del = locate_preds(set, key, preds, succs);
+        del = locate_preds(pqueue, key, preds, succs);
         if succs[0] != node then
           node.insert_state = INSERTED;
           return true;
@@ -150,14 +147,14 @@ begin
 end
 
 
-def restructure(set *lj_pq_t) -> void
+def restructure(pqueue *lj_pq_t) -> void
 begin
-    var pred node_ptr = &set.head;
+    var pred node_ptr = &pqueue.head;
     var cur node_ptr = nil;
     var head node_ptr = nil;
     var level = 19;
     while level > 0 do
-        head = set.head.next[level];
+        head = pqueue.head.next[level];
         cur = pred.next[level];
         if !is_marked(head.next[0]) then
             level--;
@@ -167,7 +164,7 @@ begin
             pred = cur;
             cur = pred.next[level];
         od
-        if __builtin_cas(&set.head.next[level], head, cur) then
+        if __builtin_cas(&pqueue.head.next[level], head, cur) then
             level--;
         fi
     od
@@ -177,10 +174,10 @@ end
  *  Leak the memory.
  */
 export
-def lj_pq_leaky_pop_min (set *lj_pq_t) -> bool
+def lj_pq_leaky_pop_min (pqueue *lj_pq_t) -> bool
 begin
 
-    var cur node_ptr = &set.head;
+    var cur node_ptr = &pqueue.head;
     var next node_ptr = nil;
     var newhead node_ptr = nil;
     var obs_head node_ptr = cur.next[0];
@@ -189,7 +186,7 @@ begin
     do
         offset++;
         next = cur.next[0];
-        if unmark(next) == &set.tail then return false; fi
+        if unmark(next) == &pqueue.tail then return false; fi
         if newhead == nil && cur.insert_state == INSERT_PENDING then newhead = cur; fi
         if is_marked(next) then continue; fi
         // Yuck
@@ -197,11 +194,11 @@ begin
     od while (((cur = unmark(next)) != nil) && is_marked(next));
 
     if newhead == nil then newhead = cur; fi
-    if offset <= set.boundoffset then return true; fi
-    if set.head.next[0] != obs_head then return true; fi
+    if offset <= pqueue.boundoffset then return true; fi
+    if pqueue.head.next[0] != obs_head then return true; fi
 
-    if __builtin_cas(&set.head.next[0], obs_head, mark(newhead)) then
-        restructure(set);
+    if __builtin_cas(&pqueue.head.next[0], obs_head, mark(newhead)) then
+        restructure(pqueue);
     fi
     return true;
 end
@@ -210,10 +207,10 @@ end
  *  Leak the memory.
  */
 export
-def lj_pq_pop_min (set *lj_pq_t) -> bool
+def lj_pq_pop_min (pqueue *lj_pq_t) -> bool
 begin
 
-    var cur node_ptr = &set.head;
+    var cur node_ptr = &pqueue.head;
     var next node_ptr = nil;
     var newhead node_ptr = nil;
     var obs_head node_ptr = cur.next[0];
@@ -222,7 +219,7 @@ begin
     do
         offset++;
         next = cur.next[0];
-        if unmark(next) == &set.tail then return false; fi
+        if unmark(next) == &pqueue.tail then return false; fi
         if newhead == nil && cur.insert_state == INSERT_PENDING then newhead = cur; fi
         if is_marked(next) then continue; fi
         // Yuck
@@ -230,11 +227,11 @@ begin
     od while (((cur = unmark(next)) != nil) && is_marked(next));
 
     if newhead == nil then newhead = cur; fi
-    if offset <= set.boundoffset then return true; fi
-    if set.head.next[0] != obs_head then return true; fi
+    if offset <= pqueue.boundoffset then return true; fi
+    if pqueue.head.next[0] != obs_head then return true; fi
 
-    if __builtin_cas(&set.head.next[0], obs_head, mark(newhead)) then
-        restructure(set);
+    if __builtin_cas(&pqueue.head.next[0], obs_head, mark(newhead)) then
+        restructure(pqueue);
         cur = unmark(obs_head);
         while cur != unmark(newhead) do
             next = unmark(cur.next[0]);

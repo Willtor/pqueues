@@ -4,10 +4,14 @@
 #include <stdatomic.h>
 #include <forkscan.h>
 #include <immintrin.h>
+#include <stdalign.h>
 #include <stdio.h>
 
+// Hedging against prefetcher.
+#define CACHE_LINE_SIZE 128
+
 struct elided_lock_t {
-  atomic_bool locked;
+  alignas(CACHE_LINE_SIZE) atomic_bool locked;
 };
 
 // Inspiration: https://software.intel.com/en-us/articles/tsx-anti-patterns-in-lock-elision-code

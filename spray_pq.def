@@ -5,6 +5,8 @@
 import "stdio.h";
 import "math.h";
 
+typedef node_ptr = volatile*volatile node_t;
+
 typedef node_state_t = enum
     | PADDING
     | ACTIVE
@@ -16,7 +18,7 @@ typedef node_t =
       priority i64,                 // Key.
       toplevel i32,                 // Height.
       state volatile node_state_t,
-      next     [20]volatile*volatile node_t          // Follow-list of nodes.
+      next     [20]node_ptr          // Follow-list of nodes.
     };
 
 export opaque
@@ -55,44 +57,44 @@ typedef spray_pq_t =
       tail  node_t
     };
 
+
+def print_node(node node_ptr) -> void
+begin
+    printf("node[%d]: %lld ", node.toplevel, node.priority);
+    if node.state == DELETED then
+        printf("DELETED\n");
+    elif node.state == PADDING then
+        printf("PADDING\n");
+    else
+        printf("ACTIVE\n");
+    fi
+end
+
 /** Print out the contents of the skip list along with node heights.
  */
 export
-def spray_pq_print (set *spray_pq_t) -> void
+def spray_pq_print (pqueue *spray_pq_t) -> void
 begin
-    printf("HEAD: %lld ", set.head.priority);
-    if set.head.state == DELETED then
-        printf("DELETED\n");
-    elif set.head.state == PADDING then
-        printf("PADDING\n");
-    else
-        printf("ACTIVE\n");
-    fi
-    var node = set.head.next[0];
-    while unmark(node) != &set.tail do
-        if is_marked(node.next[0]) then
-            node = unmark(node).next[0];
-        else
+    printf("HEAD: %lld ", pqueue.head.priority);
+    print_node(&pqueue.head);
+    var node = pqueue.head.next[0];
+    while unmark(node) != &pqueue.tail do
+        if !is_marked(node.next[0]) then
             node = unmark(node);
-            printf("node[%d]: %lld ", node.toplevel, node.priority);
-            if node.state == DELETED then
-                printf("DELETED\n");
-            elif node.state == PADDING then
-                printf("PADDING\n");
-            else
-                printf("ACTIVE\n");
-            fi
-            node = node.next[0];
+            print_node(node);
         fi
+        node = unmark(node).next[0];
     od
-    printf("TAIL: %lld ", set.tail.priority);
-    if set.tail.state == DELETED then
-        printf("DELETED\n");
-    elif set.tail.state == PADDING then
-        printf("PADDING\n");
-    else
-        printf("ACTIVE\n");
-    fi
+    print_node(&pqueue.tail);
+end
+
+def node_create(priority i64, toplevel i32, state node_state_t) -> node_ptr
+begin
+    var node = new node_t;
+    node.priority = priority;
+    node.toplevel = toplevel;
+    node.state = state;
+    return node;
 end
 
 /** Return a new fixed-height skip list.
@@ -113,60 +115,48 @@ begin
     od
     // Insert dummy nodes
     spray_pqueue.padding_head = &spray_pqueue.head;
-    printf("PADDING AMOUNT %d\n", config.padding_amount);
-    printf("START HEIGHT %d\n", config.start_height);
-    printf("MAX JUMP %d\n", config.max_jump);
-    printf("DESCEND AMOUNT %d\n", config.descend_amount);
     for var i = 1; i < config.padding_amount; ++i do
-        var padding_node = new node_t;
-        padding_node.state = PADDING;
-        padding_node.priority = 0x8000000000000000I64; 
+        var padding_node = node_create(0x8000000000000000I64, 19, PADDING);
         // Dummy nodes are fully connected.
         for var j = 0; j < 20; ++j do
             padding_node.next[j] = spray_pqueue.padding_head;
         od
         spray_pqueue.padding_head = padding_node;
     od
-    spray_pq_print(spray_pqueue);
     return spray_pqueue;
 end
 
 /** Add a node, lock-free, to the priority queue.
  */
 export
-def spray_pq_add (seed *u64, set *spray_pq_t, priority i64) -> bool
+def spray_pq_add (seed *u64, pqueue *spray_pq_t, priority i64) -> bool
 begin
-    var preds [20]volatile*volatile node_t;
-    var succs [20]volatile*volatile node_t;
+    var preds [20]node_ptr;
+    var succs [20]node_ptr;
     var toplevel = random_level(seed, 20);
-    var node volatile*volatile node_t = nil;
+    var node node_ptr = nil;
     while true do
-        if find(set, priority, preds, succs) then
+        if find(pqueue, priority, preds, succs) then
             delete node;
             return false;
         else
-            if node == nil then
-                node = new node_t;
-                node.priority = priority;
-                node.toplevel = toplevel;
-                node.state = ACTIVE;
-            fi
+            if node == nil then node = node_create(priority, toplevel, ACTIVE); fi
             for var i = 0; i <= toplevel; ++i do
-                node.next[i] = unmark(succs[i]);
+                node.next[i] = succs[i];
             od
             var pred = preds[0];
             var succ = succs[0];
-            if !__builtin_cas(&pred.next[0], unmark(succ), node) then
+            if !__builtin_cas(&pred.next[0], succ, node) then
                 continue;
             fi
             for var i = 1; i <= toplevel; ++i do
                 while true do
                     pred = preds[i];
                     succ = succs[i];
-                    if __builtin_cas(&pred.next[i], unmark(succ), node) then
+                    if __builtin_cas(&pred.next[i], succ, node) then
                         break;
                     fi
-                    find(set, priority, preds, succs);
+                    find(pqueue, priority, preds, succs);
                 od
             od
             return true;
@@ -176,14 +166,13 @@ end
 
 /** Remove a node, lock-free, from the skiplist.
  */
-export
-def spray_pq_remove (set *spray_pq_t, x i64) -> bool
+def spray_pq_remove (pqueue *spray_pq_t, x i64) -> bool
 begin
-    var preds [20]volatile*volatile node_t;
-    var succs [20]volatile*volatile node_t;
-    var succ volatile*volatile node_t;
+    var preds [20]node_ptr;
+    var succs [20]node_ptr;
+    var succ node_ptr;
     while true do
-        if false == find(set, x, preds, succs) then
+        if false == find(pqueue, x, preds, succs) then
             return false;
         else
             var node_to_remove = succs[0];
@@ -211,7 +200,7 @@ begin
                 if i_marked_it then
                     // FIXME: succs[0]?  Should retire node_to_remove?
                     retire succs[0];
-                    find(set, x, preds, succs);
+                    find(pqueue, x, preds, succs);
                     return true;
                 elif marked then
                     return false;
@@ -223,14 +212,13 @@ end
 
 /** Remove a node, lock-free, from the skiplist.  Leak the memory.
  */
-export
-def spray_pq_leaky_remove (set *spray_pq_t, x i64) -> bool
+def spray_pq_leaky_remove (pqueue *spray_pq_t, x i64) -> bool
 begin
-    var preds [20]volatile*volatile node_t;
-    var succs [20]volatile*volatile node_t;
-    var succ volatile*volatile node_t;
+    var preds [20]node_ptr;
+    var succs [20]node_ptr;
+    var succ node_ptr;
     while true do
-        if false == find(set, x, preds, succs) then
+        if false == find(pqueue, x, preds, succs) then
             return false;
         else
             var node_to_remove = succs[0];
@@ -256,7 +244,7 @@ begin
                 succ = succs[0].next[0];
                 marked = is_marked(succ);
                 if i_marked_it then
-                    find(set, x, preds, succs);
+                    find(pqueue, x, preds, succs);
                     return true;
                 elif marked then
                     return false;
@@ -269,10 +257,10 @@ end
 /** Remove a node, lock-free, from the skiplist.
  */
 export
-def spray_pq_pop_min (seed *u64, set *spray_pq_t) -> bool
+def spray_pq_pop_min (seed *u64, pqueue *spray_pq_t) -> bool
 begin
   
-  for var node = spray(seed, set); node != &set.tail; node = unmark(node.next[0]) do
+  for var node = spray(seed, pqueue); node != &pqueue.tail; node = unmark(node.next[0]) do
     
     // Spray failed, try again
     if node.state == PADDING || node.state == DELETED then
@@ -282,7 +270,7 @@ begin
     var res = __builtin_cas(&node.state, ACTIVE, DELETED);
     // We didn't delete a node from the list.
     if res then
-      var removed = spray_pq_leaky_remove(set, node.priority);
+      var removed = spray_pq_leaky_remove(pqueue, node.priority);
       if removed then retire node; fi
       return true;
     fi
@@ -293,9 +281,9 @@ end
 /** Remove a node, lock-free, from the skiplist.  Leak the memory.
  */
 export
-def spray_pq_leaky_pop_min (seed *u64, set *spray_pq_t) -> bool
+def spray_pq_leaky_pop_min (seed *u64, pqueue *spray_pq_t) -> bool
 begin  
-  for var node = spray(seed, set); node != &set.tail; node = unmark(node.next[0]) do
+  for var node = spray(seed, pqueue); node != &pqueue.tail; node = unmark(node.next[0]) do
     
     // Spray failed, try again
     if node.state == PADDING || node.state == DELETED then
@@ -305,7 +293,7 @@ begin
     var res = __builtin_cas(&node.state, ACTIVE, DELETED);
     // We didn't delete a node from the list.
     if res then
-      return spray_pq_leaky_remove(set, node.priority);
+      return spray_pq_leaky_remove(pqueue, node.priority);
     fi
   od
   return false;
@@ -333,13 +321,13 @@ begin
     return level - 1;
 end
 
-def spray (seed *u64, set *spray_pq_t) -> volatile*volatile node_t
+def spray (seed *u64, pqueue *spray_pq_t) -> node_ptr
 begin
-  var tail = &set.tail;
-  var cur_node volatile*volatile node_t = unmark(set.padding_head);
-  var D = set.config.descend_amount;
-  for var H = set.config.start_height; H >= 0; H = H - D do
-    var jump i64 = fast_rand(seed) % (set.config.max_jump + 1);
+  var tail = &pqueue.tail;
+  var cur_node node_ptr = unmark(pqueue.padding_head);
+  var D = pqueue.config.descend_amount;
+  for var H = pqueue.config.start_height; H >= 0; H = H - D do
+    var jump i64 = fast_rand(seed) % (pqueue.config.max_jump + 1);
     while jump > 0 do
       var next = unmark(cur_node.next[H]);
       if next == nil || next == tail then
@@ -352,13 +340,13 @@ begin
   return cur_node;
 end 
 
-def find (set *spray_pq_t, priority i64, preds [20]volatile*volatile node_t, succs [20]volatile*volatile node_t) -> bool
+def find (pqueue *spray_pq_t, priority i64, preds [20]node_ptr, succs [20]node_ptr) -> bool
 begin
     var marked, snip bool;
-    var pred, curr, succ volatile*volatile node_t = nil, nil, nil;
+    var pred, curr, succ node_ptr = nil, nil, nil;
 retry:
     while true do
-        pred = &set.head;
+        pred = &pqueue.head;
         for var level = 19; level >= 0; --level do
             curr = unmark(pred.next[level]);
             while true do
@@ -383,14 +371,14 @@ retry:
     od
 end
 
-def ref_and_markbit (ptr volatile*volatile node_t) -> { volatile*volatile node_t, bool } =
+def ref_and_markbit (ptr node_ptr) -> { node_ptr, bool } =
     { unmark(ptr), is_marked(ptr) };
 
-def mark (ptr volatile*volatile node_t) -> volatile*volatile node_t =
-    cast(type volatile*volatile node_t, 0x1I64 | cast(type i64, ptr));
+def mark (ptr node_ptr) -> node_ptr =
+    cast(type node_ptr, 0x1I64 | cast(type i64, ptr));
 
-def unmark (ptr volatile*volatile node_t) -> volatile*volatile node_t =
-    cast(type volatile*volatile node_t, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
+def unmark (ptr node_ptr) -> node_ptr =
+    cast(type node_ptr, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
 
-def is_marked (ptr volatile*volatile node_t) -> bool =
+def is_marked (ptr node_ptr) -> bool =
     cast(type bool, 0x1I64 & cast(type i64, ptr));

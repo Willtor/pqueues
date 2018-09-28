@@ -7,7 +7,7 @@ import "stdio.h";
 typedef node_ptr = volatile*volatile node;
 
 typedef node =
-    { val      i64,            // Value.
+    { key      i64,            // Value.
       toplevel i32,            // Height.
       next     [20]node_ptr    // Follow-list of nodes.
     };
@@ -29,11 +29,20 @@ begin
             node = unmark(node).next[0];
         else
             node = unmark(node);
-            printf("node[%d]: %lld\n", node.toplevel, node.val);
+            printf("node[%d]: %lld\n", node.toplevel, node.key);
             node = node.next[0];
         fi
     od
 end
+
+def node_create(key i64, toplevel i32) -> node_ptr
+begin
+    var node = new node;
+    node.key = key;
+    node.toplevel = toplevel;
+    return node;
+end
+
 
 /** Return a new fixed-height skip list.
  */
@@ -41,8 +50,8 @@ export
 def fhsl_lf_create () -> *fhsl_lf
 begin
     var fhsl_lf = new fhsl_lf;
-    fhsl_lf.head.val = 0x8000000000000000I64;
-    fhsl_lf.tail.val = 0x7FFFFFFFFFFFFFFFI64;
+    fhsl_lf.head.key = 0x8000000000000000I64;
+    fhsl_lf.tail.key = 0x7FFFFFFFFFFFFFFFI64;
     for var i = 0; i < 20; ++i do
         fhsl_lf.head.next[i] = &fhsl_lf.tail;
         fhsl_lf.tail.next[i] = nil;
@@ -60,11 +69,11 @@ begin
     var node node_ptr = &set.head;
     for var level = 19; level >= 0; --level do
         var next = unmark(node.next[level]);
-        while next.val <= x do
+        while next.key <= x do
             node = next;
             next = unmark(node.next[level]);
         od
-        if node.val == x then
+        if node.key == x then
             if !is_marked(node.next[0]) then return true; fi
             return false;
         fi
@@ -86,24 +95,20 @@ begin
             delete node;
             return false;
         fi
-        if node == nil then
-            node = new node;
-            node.val = x;
-            node.toplevel = toplevel;
-        fi
+        if node == nil then node = node_create(x, toplevel); fi
         for var i = 0; i <= toplevel; ++i do
-            node.next[i] = unmark(succs[i]);
+            node.next[i] = succs[i];
         od
         var pred = preds[0];
         var succ = succs[0];
-        if !__builtin_cas(&pred.next[0], unmark(succ), node) then
+        if !__builtin_cas(&pred.next[0], succ, node) then
             continue;
         fi
         for var i = 1; i <= toplevel; ++i do
             while true do
                 pred = preds[i];
                 succ = succs[i];
-                if __builtin_cas(&pred.next[i], unmark(succ), node) then
+                if __builtin_cas(&pred.next[i], succ, node) then
                     break;
                 fi
                 find(set, x, preds, succs);
@@ -124,39 +129,39 @@ begin
     while true do
         if false == find(set, x, preds, succs) then
             return false;
-        else
-            var node_to_remove = succs[0];
-            var marked bool;
-            for var level = node_to_remove.toplevel;
-                level >= 1;
-                --level
-            do
+        fi
+        var node_to_remove = succs[0];
+        var marked bool;
+        for var level = node_to_remove.toplevel;
+            level >= 1;
+            --level
+        do
+            succ = node_to_remove.next[level];
+            marked = is_marked(succ);
+            while !marked do
+                __builtin_cas(&node_to_remove.next[level], succ,
+                                mark(succ));
                 succ = node_to_remove.next[level];
                 marked = is_marked(succ);
-                while !marked do
-                    __builtin_cas(&node_to_remove.next[level], unmark(succ),
-                                  mark(succ));
-                    succ = node_to_remove.next[level];
-                    marked = is_marked(succ);
-                od
             od
-            succ = node_to_remove.next[0];
+        od
+        succ = node_to_remove.next[0];
+        marked = is_marked(succ);
+        if marked then return false; fi
+        while true do
+            var i_marked_it = __builtin_cas(&node_to_remove.next[0],
+                                            succ, mark(succ));
+            succ = succs[0].next[0];
             marked = is_marked(succ);
-            while true do
-                var i_marked_it = __builtin_cas(&node_to_remove.next[0],
-                                                unmark(succ), mark(succ));
-                succ = succs[0].next[0];
-                marked = is_marked(succ);
-                if i_marked_it then
-                    // FIXME: succs[0]?  Should retire node_to_remove?
-                    retire node_to_remove;
-                    find(set, x, preds, succs);
-                    return true;
-                elif marked then
-                    return false;
-                fi
-            od
-        fi
+            if i_marked_it then
+                // FIXME: succs[0]?  Should retire node_to_remove?
+                retire node_to_remove;
+                find(set, x, preds, succs);
+                return true;
+            elif marked then
+                return false;
+            fi
+        od
     od
 end
 
@@ -171,37 +176,38 @@ begin
     while true do
         if false == find(set, x, preds, succs) then
             return false;
-        else
-            var node_to_remove = succs[0];
-            var marked bool;
-            for var level = node_to_remove.toplevel;
-                level >= 1;
-                --level
-            do
+        fi
+        var node_to_remove = succs[0];
+        var marked bool;
+        for var level = node_to_remove.toplevel;
+            level >= 1;
+            --level
+        do
+            succ = node_to_remove.next[level];
+            marked = is_marked(succ);
+            while !marked do
+                __builtin_cas(&node_to_remove.next[level], succ,
+                                mark(succ));
                 succ = node_to_remove.next[level];
                 marked = is_marked(succ);
-                while !marked do
-                    __builtin_cas(&node_to_remove.next[level], unmark(succ),
-                                  mark(succ));
-                    succ = node_to_remove.next[level];
-                    marked = is_marked(succ);
-                od
             od
-            succ = node_to_remove.next[0];
+        od
+        succ = node_to_remove.next[0];
+        marked = is_marked(succ);
+        if marked then return false; fi
+        while true do
+            var i_marked_it = __builtin_cas(&node_to_remove.next[0],
+                                            succ, mark(succ));
+            succ = succs[0].next[0];
             marked = is_marked(succ);
-            while true do
-                var i_marked_it = __builtin_cas(&node_to_remove.next[0],
-                                                unmark(succ), mark(succ));
-                succ = succs[0].next[0];
-                marked = is_marked(succ);
-                if i_marked_it then
-                    find(set, x, preds, succs);
-                    return true;
-                elif marked then
-                    return false;
-                fi
-            od
-        fi
+            if i_marked_it then
+                // FIXME: succs[0]?  Should retire node_to_remove?
+                find(set, x, preds, succs);
+                return true;
+            elif marked then
+                return false;
+            fi
+        od
     od
 end
 
@@ -233,7 +239,7 @@ begin
             succ = node_to_remove.next[level];
             var marked = is_marked(succ);
             while !marked do
-                __builtin_cas(&node_to_remove.next[level], unmark(succ),
+                __builtin_cas(&node_to_remove.next[level], succ,
                               mark(succ));
                 succ = node_to_remove.next[level];
                 marked = is_marked(succ);
@@ -241,9 +247,10 @@ begin
         od
         succ = node_to_remove.next[0];
 
-        if __builtin_cas(&node_to_remove.next[0], unmark(succ), mark(succ))
+        var marked = is_marked(succ);
+        if !marked && __builtin_cas(&node_to_remove.next[0], succ, mark(succ))
         then
-            find(set, node_to_remove.val, preds, succs);
+            find(set, node_to_remove.key, preds, succs);
             return true;
         fi
     od
@@ -264,6 +271,7 @@ begin
         if node_to_remove == &set.tail then
             return false;
         fi
+
         for var level = node_to_remove.toplevel; level >= 0; --level do
             preds[level] = &set.head;
             succs[level] = node_to_remove;
@@ -276,7 +284,7 @@ begin
             succ = node_to_remove.next[level];
             var marked = is_marked(succ);
             while !marked do
-                __builtin_cas(&node_to_remove.next[level], unmark(succ),
+                __builtin_cas(&node_to_remove.next[level], succ,
                               mark(succ));
                 succ = node_to_remove.next[level];
                 marked = is_marked(succ);
@@ -284,9 +292,10 @@ begin
         od
         succ = node_to_remove.next[0];
 
-        if __builtin_cas(&node_to_remove.next[0], unmark(succ), mark(succ))
+        var marked = is_marked(succ);
+        if !marked && __builtin_cas(&node_to_remove.next[0], succ, mark(succ))
         then
-            find(set, node_to_remove.val, preds, succs);
+            find(set, node_to_remove.key, preds, succs);
             retire node_to_remove;
             return true;
         fi
@@ -295,15 +304,15 @@ end
 
 def fast_rand (seed *u64) -> u64
 begin
-    var val = seed[0];
-    if val == 0 then val = 1; fi
+    var key = seed[0];
+    if key == 0 then key = 1; fi
 
-    val ^= val << 6;
-    val ^= val >> 21;
-    val ^= val << 7;
+    key ^= key << 6;
+    key ^= key >> 21;
+    key ^= key << 7;
 
-    seed[0] = val;
-    return val;
+    seed[0] = key;
+    return key;
 end
 
 def random_level (seed *u64, max u32) -> u32
@@ -335,7 +344,7 @@ retry:
                     curr = unmark(pred.next[level]);
                     { succ, marked } = ref_and_markbit(curr.next[level]);
                 od
-                if curr.val < key then
+                if curr.key < key then
                     pred = curr;
                     curr = succ;
                 else
@@ -345,7 +354,7 @@ retry:
             preds[level] = pred;
             succs[level] = curr;
         od
-        return curr.val == key;
+        return curr.key == key;
     od
 end
 

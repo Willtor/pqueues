@@ -14,6 +14,7 @@ typedef struct c_spray_pq_t c_spray_pq_t;
 
 c_spray_pq_t *c_spray_pq_create(int64_t threads);
 
-int c_spray_pq_add(uint64_t *seed, c_spray_pq_t *set, int64_t key);
-int c_spray_pq_leaky_pop_min(uint64_t *seed, c_spray_pq_t *set);
-void c_spray_pq_print (c_spray_pq_t *set);
+int c_spray_pq_add(uint64_t *seed, c_spray_pq_t *pqueue, int64_t key);
+int c_spray_pq_leaky_pop_min(uint64_t *seed, c_spray_pq_t *pqueue);
+int c_spray_pq_pop_min(uint64_t *seed, c_spray_pq_t *pqueue);
+void c_spray_pq_print (c_spray_pq_t *pqueue);

@@ -11,7 +11,6 @@
 #include <assert.h>
 
 typedef struct node_t node_t;
-// typedef node_t volatile * volatile node_ptr;
 typedef node_t* node_ptr;
 typedef struct unpacked_t unpacked_t; 
 
@@ -53,9 +52,9 @@ static bool is_marked(node_ptr node){
 
 /** Print out the contents of the skip list along with node heights.
  */
-void c_lj_pq_print (c_lj_pq_t *set){
-  node_ptr node = atomic_load_explicit(&set->head.next[0], memory_order_consume);
-  while(unmark(node) != &set->tail) {
+void c_lj_pq_print (c_lj_pq_t *pqueue){
+  node_ptr node = atomic_load_explicit(&pqueue->head.next[0], memory_order_consume);
+  while(unmark(node) != &pqueue->tail) {
     node_ptr unmarked_node = unmark(node);
     printf("node[%d]: %ld deleted: %d\n", unmarked_node->toplevel, unmarked_node->key, is_marked(node));
     node = atomic_load_explicit(&unmarked_node->next[0], memory_order_relaxed);
@@ -100,11 +99,11 @@ static int32_t random_level (uint64_t *seed, int32_t max) {
 
 
 static node_ptr locate_preds(
-  c_lj_pq_t *set, 
+  c_lj_pq_t *pqueue, 
   int64_t key,
   node_ptr preds[N],
   node_ptr succs[N]) {
-  node_ptr cur = &set->head, next = NULL, del = NULL;
+  node_ptr cur = &pqueue->head, next = NULL, del = NULL;
   int32_t level = N - 1;
   bool deleted = false;
   while(level >= 0) {
@@ -132,12 +131,12 @@ static node_ptr locate_preds(
 
 /** Add a node, lock-free, to the skiplist.
  */
-int c_lj_pq_add(uint64_t *seed, c_lj_pq_t * set, int64_t key) {
+int c_lj_pq_add(uint64_t *seed, c_lj_pq_t * pqueue, int64_t key) {
   node_ptr preds[N], succs[N];
   int32_t toplevel = random_level(seed, N);
   node_ptr node = NULL;
   while(true) {
-    node_ptr del = locate_preds(set, key, preds, succs);
+    node_ptr del = locate_preds(pqueue, key, preds, succs);
     node_ptr pred_next = atomic_load_explicit(&preds[0]->next[0], memory_order_relaxed);
     if(succs[0]->key == key &&
       !is_marked(pred_next) &&
@@ -163,7 +162,7 @@ int c_lj_pq_add(uint64_t *seed, c_lj_pq_t * set, int64_t key) {
       atomic_store_explicit(&node->next[i], succs[i], memory_order_release);
 
       if(!atomic_compare_exchange_weak_explicit(&preds[i]->next[i], &succs[i], node, memory_order_release, memory_order_relaxed)) {
-        del = locate_preds(set, key, preds, succs);
+        del = locate_preds(pqueue, key, preds, succs);
         if(succs[0] != node) {
           atomic_store_explicit(&node->insert_state, INSERTED, memory_order_relaxed);
           return true;
@@ -176,12 +175,12 @@ int c_lj_pq_add(uint64_t *seed, c_lj_pq_t * set, int64_t key) {
 }
 
 
-static void restructure(c_lj_pq_t *set) {
+static void restructure(c_lj_pq_t *pqueue) {
   node_ptr pred = NULL, cur = NULL, head = NULL;
   int32_t level = N - 1;
-  pred = &set->head;
+  pred = &pqueue->head;
   while(level > 0) {
-    head = atomic_load_explicit(&set->head.next[level], memory_order_consume);
+    head = atomic_load_explicit(&pqueue->head.next[level], memory_order_consume);
     cur = atomic_load_explicit(&pred->next[level], memory_order_consume);
     if(!is_marked(atomic_load_explicit(&head->next[0], memory_order_consume))) {
       level--;
@@ -191,7 +190,7 @@ static void restructure(c_lj_pq_t *set) {
       pred = cur;
       cur = atomic_load_explicit(&pred->next[level], memory_order_consume);
     }
-    if(atomic_compare_exchange_weak_explicit(&set->head.next[level], 
+    if(atomic_compare_exchange_weak_explicit(&pqueue->head.next[level], 
       &head, cur, memory_order_release, memory_order_consume)){
       level--;
     }
@@ -202,15 +201,15 @@ static void restructure(c_lj_pq_t *set) {
 /** Pop the front node from the list.  Return true iff there was a node to pop.
  *  Leak the memory.
  */
-int c_lj_pq_leaky_pop_min(c_lj_pq_t * set) {
-  node_ptr cur = &set->head, next = NULL, newhead = NULL,
+int c_lj_pq_leaky_pop_min(c_lj_pq_t * pqueue) {
+  node_ptr cur = &pqueue->head, next = NULL, newhead = NULL,
     obs_head = NULL;
   int32_t offset = 0;
   obs_head = atomic_load_explicit(&cur->next[0], memory_order_consume);
   do {
     offset++;
     next = atomic_load_explicit(&cur->next[0], memory_order_consume);
-    if(unmark(next) == &set->tail) { return false; }
+    if(unmark(next) == &pqueue->tail) { return false; }
     if(newhead == NULL && atomic_load_explicit(&cur->insert_state, memory_order_relaxed) == INSERT_PENDING) { newhead = cur; }
     if(is_marked(next)) { continue; }
     // Yuck
@@ -219,11 +218,11 @@ int c_lj_pq_leaky_pop_min(c_lj_pq_t * set) {
   
 
   if(newhead == NULL) { newhead = cur; }
-  if(offset <= set->boundoffset) { return true; }
-  if(atomic_load_explicit(&set->head.next[0], memory_order_relaxed) != obs_head) { return true; }
+  if(offset <= pqueue->boundoffset) { return true; }
+  if(atomic_load_explicit(&pqueue->head.next[0], memory_order_relaxed) != obs_head) { return true; }
 
-  if(atomic_compare_exchange_weak_explicit(&set->head.next[0], &obs_head, mark(newhead), memory_order_release, memory_order_relaxed)) {
-    restructure(set);
+  if(atomic_compare_exchange_weak_explicit(&pqueue->head.next[0], &obs_head, mark(newhead), memory_order_release, memory_order_relaxed)) {
+    restructure(pqueue);
   }
   return true;
 }

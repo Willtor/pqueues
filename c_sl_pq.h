@@ -14,6 +14,7 @@ typedef struct c_sl_pq_t c_sl_pq_t;
 
 c_sl_pq_t * c_sl_pq_create();
 
-int c_sl_pq_add(uint64_t *seed, c_sl_pq_t *set, int64_t key);
-int c_sl_pq_leaky_pop_min(c_sl_pq_t *set);
-void c_sl_pq_print (c_sl_pq_t *set);
+int c_sl_pq_add(uint64_t *seed, c_sl_pq_t *pqueue, int64_t key);
+int c_sl_pq_leaky_pop_min(c_sl_pq_t *pqueue);
+int c_sl_pq_pop_min(c_sl_pq_t * pqueue);
+void c_sl_pq_print (c_sl_pq_t *pqueue);

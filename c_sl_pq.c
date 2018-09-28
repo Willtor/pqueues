@@ -59,9 +59,9 @@ static node_unpacked_t node_unpack(node_ptr node){
     };
 }
 
-void c_sl_pq_print (c_sl_pq_t *set){
-  node_ptr node = atomic_load_explicit(&set->head.next[0], memory_order_relaxed);
-  while(node_unmark(node) != &set->tail) {
+void c_sl_pq_print (c_sl_pq_t *pqueue){
+  node_ptr node = atomic_load_explicit(&pqueue->head.next[0], memory_order_relaxed);
+  while(node_unmark(node) != &pqueue->tail) {
     node_ptr next = atomic_load_explicit(&node->next[0], memory_order_consume);
     if(!node_is_marked(next)) {
       printf("node[%d]: %ld\n", node->toplevel, node->key);
@@ -103,13 +103,13 @@ static int32_t random_level (uint64_t *seed, int32_t max) {
   return level - 1;
 }
 
-static bool find(c_sl_pq_t *set, int64_t key, 
+static bool find(c_sl_pq_t *pqueue, int64_t key, 
   node_ptr preds[N], node_ptr succs[N]) {
   bool marked, snip;
   node_ptr pred = NULL, curr = NULL, succ = NULL;
 retry:
   while(true) {
-    pred = &set->head;
+    pred = &pqueue->head;
     for(int64_t level = N - 1; level >= 0; --level) {
       curr = node_unmark(atomic_load_explicit(&pred->next[level], memory_order_consume));
       while(true) {
@@ -142,12 +142,12 @@ retry:
 
 /** Add a node, lock-free, to the Shavit Lotan priority queue.
  */
-int c_sl_pq_add(uint64_t *seed, c_sl_pq_t * set, int64_t key) {
+int c_sl_pq_add(uint64_t *seed, c_sl_pq_t * pqueue, int64_t key) {
   node_ptr preds[N], succs[N];
   int32_t toplevel = random_level(seed, N);
   node_ptr node = NULL;
   while(true) {
-    if(find(set, key, preds, succs)) {
+    if(find(pqueue, key, preds, succs)) {
       forkscan_free((void*)node);
       return false;
     }
@@ -166,7 +166,7 @@ int c_sl_pq_add(uint64_t *seed, c_sl_pq_t * set, int64_t key) {
           &succ, node, memory_order_release, memory_order_relaxed)) {
           break;
         }
-        bool _ = find(set, key, preds, succs);
+        bool _ = find(pqueue, key, preds, succs);
       }
     }
     return true;
@@ -175,11 +175,11 @@ int c_sl_pq_add(uint64_t *seed, c_sl_pq_t * set, int64_t key) {
 
 /** Remove a node, lock-free, from the skiplist.
  */
-int c_sl_pq_remove_leaky(c_sl_pq_t * set, int64_t key) {
+int c_sl_pq_remove_leaky(c_sl_pq_t * pqueue, int64_t key) {
   node_ptr preds[N], succs[N];
   node_ptr succ = NULL;
   while(true) {
-    if(!find(set, key, preds, succs)) {
+    if(!find(pqueue, key, preds, succs)) {
       return false;
     }
     node_ptr node_to_remove = succs[0];
@@ -200,7 +200,44 @@ int c_sl_pq_remove_leaky(c_sl_pq_t * set, int64_t key) {
         &succ, node_mark(succ), memory_order_relaxed, memory_order_relaxed);
       marked = node_is_marked(succ);
       if(i_marked_it) {
-        bool _ = find(set, key, preds, succs);
+        bool _ = find(pqueue, key, preds, succs);
+        return true;
+      } else if(marked) {
+        return false;
+      }
+    }
+  }
+}
+
+/** Remove a node, lock-free, from the skiplist.
+ */
+int c_sl_pq_remove(c_sl_pq_t * pqueue, int64_t key) {
+  node_ptr preds[N], succs[N];
+  node_ptr succ = NULL;
+  while(true) {
+    if(!find(pqueue, key, preds, succs)) {
+      return false;
+    }
+    node_ptr node_to_remove = succs[0];
+    bool marked;
+    for(int64_t level = node_to_remove->toplevel; level >= 1; --level) {
+      succ = atomic_load_explicit(&node_to_remove->next[level], memory_order_relaxed);
+      marked = node_is_marked(succ);
+      while(!marked) {
+        bool _ = atomic_compare_exchange_weak_explicit(&node_to_remove->next[level],
+          &succ, node_mark(succ), memory_order_relaxed, memory_order_relaxed);
+        marked = node_is_marked(succ);
+      }
+    }
+    succ = atomic_load_explicit(&node_to_remove->next[0], memory_order_relaxed);
+    marked = node_is_marked(succ);
+    while(true) {
+      bool i_marked_it = atomic_compare_exchange_weak_explicit(&node_to_remove->next[0],
+        &succ, node_mark(succ), memory_order_relaxed, memory_order_relaxed);
+      marked = node_is_marked(succ);
+      if(i_marked_it) {
+        bool _ = find(pqueue, key, preds, succs);
+        forkscan_retire(node_to_remove);
         return true;
       } else if(marked) {
         return false;
@@ -211,18 +248,38 @@ int c_sl_pq_remove_leaky(c_sl_pq_t * set, int64_t key) {
 
 /** Remove the minimum element in the Shavit Lotan priority queue.
  */
-int c_sl_pq_leaky_pop_min(c_sl_pq_t * set) {
+int c_sl_pq_leaky_pop_min(c_sl_pq_t * pqueue) {
   while(true) {
-    node_ptr curr = node_unmark(atomic_load_explicit(&set->head.next[0], memory_order_consume));
-    if(curr == &set->tail) {
+    node_ptr curr = node_unmark(atomic_load_explicit(&pqueue->head.next[0], memory_order_consume));
+    if(curr == &pqueue->tail) {
       return false;
     }
-    for(; curr != &set->tail; curr = node_unmark(atomic_load_explicit(&curr->next[0], memory_order_consume))) {
+    for(; curr != &pqueue->tail; curr = node_unmark(atomic_load_explicit(&curr->next[0], memory_order_consume))) {
       if(curr->deleted) {
         continue;
       }
       if(!atomic_exchange_explicit(&curr->deleted, true, memory_order_relaxed)){
-        bool res = c_sl_pq_remove_leaky(set, curr->key);
+        bool res = c_sl_pq_remove_leaky(pqueue, curr->key);
+        return true;
+      }
+    }
+  }
+}
+
+/** Remove the minimum element in the Shavit Lotan priority queue.
+ */
+int c_sl_pq_pop_min(c_sl_pq_t * pqueue) {
+  while(true) {
+    node_ptr curr = node_unmark(atomic_load_explicit(&pqueue->head.next[0], memory_order_consume));
+    if(curr == &pqueue->tail) {
+      return false;
+    }
+    for(; curr != &pqueue->tail; curr = node_unmark(atomic_load_explicit(&curr->next[0], memory_order_consume))) {
+      if(atomic_load_explicit(&curr->deleted, memory_order_relaxed)) {
+        continue;
+      }
+      if(!atomic_exchange_explicit(&curr->deleted, true, memory_order_relaxed)){
+        bool res = c_sl_pq_remove(pqueue, curr->key);
         return true;
       }
     }

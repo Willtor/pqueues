@@ -295,6 +295,7 @@ begin
     xcase { FHSL_LF, POLICY_LEAKY }:
     ocase { FHSL_LF, POLICY_RETIRE }:
     ocase { C_FHSL_LF, POLICY_LEAKY }:
+    ocase { C_FHSL_LF, POLICY_RETIRE }:
     ocase { FHSL_TX, POLICY_LEAKY }:
     ocase { SL_PQ, POLICY_LEAKY }:
     ocase { SL_PQ, POLICY_RETIRE }:
@@ -302,8 +303,10 @@ begin
     ocase { SPRAY, POLICY_RETIRE }:
     ocase { SPRAY_TX, POLICY_LEAKY }:
     ocase { C_SPRAY, POLICY_LEAKY }:
+    ocase { C_SPRAY, POLICY_RETIRE }:
     ocase { C_SPRAY_TX, POLICY_LEAKY }:
     ocase { C_SL_PQ, POLICY_LEAKY }:
+    ocase { C_SL_PQ, POLICY_RETIRE }:
     ocase { LJ_PQ, POLICY_LEAKY }:
     ocase { LJ_PQ, POLICY_RETIRE }:
     ocase { C_LJ_PQ, POLICY_LEAKY }:
@@ -437,6 +440,12 @@ begin
                         stats.remove_successes++;
                         insert_action = true;
                     fi
+                else
+                    // policy = POLICY_RETIRE
+                    if c_fhsl_lf_pop_min(pqueue) == 1 then
+                        stats.remove_successes++;
+                        insert_action = true;
+                    fi
                 fi
             fi
 
@@ -505,6 +514,12 @@ begin
                         stats.remove_successes++;
                         insert_action = true;
                     fi
+                else
+                    // policy = POLICY_RETIRE
+                    if 1 == c_sl_pq_pop_min(pqueue) then
+                        stats.remove_successes++;
+                        insert_action = true;
+                    fi
                 fi
             fi
 
@@ -563,14 +578,20 @@ begin
         xcase C_SPRAY:
             if insert_action then
                 stats.insert_attempts++;
-                if 1 == c_spray_pq_add(&seed, pqueue, val) then
+                if c_spray_pq_add(&seed, pqueue, val) == 1 then
                     stats.insert_successes++;
                     insert_action = false;
                 fi
             else // insert_action == false.
                 stats.remove_attempts++;
                 if policy == POLICY_LEAKY then
-                    if 1 == c_spray_pq_leaky_pop_min(&seed, pqueue) then
+                    if c_spray_pq_leaky_pop_min(&seed, pqueue) == 1 then
+                        stats.remove_successes++;
+                        insert_action = true;
+                    fi
+                else
+                    // policy = POLICY_RETIRE
+                    if c_spray_pq_pop_min(&seed, pqueue) == 1 then
                         stats.remove_successes++;
                         insert_action = true;
                     fi
@@ -578,7 +599,7 @@ begin
             fi
 
 /***************************************************************************/
-/*             C Spray-list with underlying lock-free skip-list             */
+/*           C Spray-list with underlying transactional skip-list          */
 /***************************************************************************/
 
         xcase C_SPRAY_TX:
@@ -744,7 +765,6 @@ begin
     if max_threads > 16 then
         max_threads = 16;
     fi
-    printf("Init threads %ld\n", max_threads);
     var thread_data *init_thread_data_t = new [max_threads]init_thread_data_t;
     var tids *pthread_t = new [max_threads]pthread_t;
     for var i = 0; i < max_threads; ++i do

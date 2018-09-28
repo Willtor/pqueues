@@ -15,7 +15,7 @@ typedef state_t = enum
 typedef node_ptr = volatile * volatile node;
 
 typedef node =
-    { val      i64,            // Value.
+    { priority      i64,            // Value.
       state volatile state_t,  // Logical deletion state.
       toplevel i32,            // Height.
       next     [20]node_ptr    // Follow-list of nodes.
@@ -29,28 +29,27 @@ typedef sl_pq_t =
     };
 
 export
-def sl_pq_print (set *sl_pq_t) -> void
+def sl_pq_print (pqueue *sl_pq_t) -> void
 begin
-    var node = set.head.next[0];
-    while unmark(node) != &set.tail do
+    var node = pqueue.head.next[0];
+    while unmark(node) != &pqueue.tail do
         if is_marked(node.next[0]) then
             node = unmark(node).next[0];
         else
             node = unmark(node);
-            printf("node[%d]: %lld\n", node.toplevel, node.val);
+            printf("node[%d]: %lld\n", node.toplevel, node.priority);
             node = node.next[0];
         fi
     od
 end
 
-/** Return a new fixed-height skip list.
- */
+
 export
 def sl_pq_create () -> *sl_pq_t
 begin
     var slpq = new sl_pq_t;
-    slpq.head.val = 0x8000000000000000I64;
-    slpq.tail.val = 0x7FFFFFFFFFFFFFFFI64;
+    slpq.head.priority = 0x8000000000000000I64;
+    slpq.tail.priority = 0x7FFFFFFFFFFFFFFFI64;
     for var i = 0; i < 20; ++i do
         slpq.head.next[i] = &slpq.tail;
         slpq.tail.next[i] = nil;
@@ -58,30 +57,30 @@ begin
     return slpq;
 end
 
-/** Add a node, lock-free, to the Shavit Lotan priority queue.
- */
+def node_create(priority i64, toplevel i32) -> node_ptr
+begin
+    var node = new node;
+    node.priority = priority;
+    node.toplevel = toplevel;
+    return node;
+end
+
 export
-def sl_pq_add (seed *u64, set *sl_pq_t, x i64) -> bool
+def sl_pq_add (seed *u64, pqueue *sl_pq_t, x i64) -> bool
 begin
     var preds [20]node_ptr;
     var succs [20]node_ptr;
     var toplevel = random_level(seed, 20);
     var node node_ptr = nil;
     while true do
-        if true == find(set, x, preds, succs) then
+        if true == find(pqueue, x, preds, succs) then
             delete node;
             return false;
         fi
         var node = new node;
-        node.val = x;
+        node.priority = x;
         node.toplevel = toplevel;
-        //if node == nil then node = node_create(x, toplevel); fi
-        if node == nil then
-            node = new node;
-            node.val = x;
-            node.toplevel = toplevel;
-            node.state = ACTIVE;
-        fi
+        if node == nil then node = node_create(x, toplevel); fi
         for var i = 0; i <= toplevel; ++i do
             node.next[i] = unmark(succs[i]);
         od
@@ -97,7 +96,7 @@ begin
                 if __builtin_cas(&pred.next[i], unmark(succ), node) then
                     break;
                 fi
-                find(set, x, preds, succs);
+                find(pqueue, x, preds, succs);
             od
         od
         return true;
@@ -107,13 +106,13 @@ end
 /** Remove a node, lock-free, from the skiplist.
  */
 export
-def sl_pq_remove (set *sl_pq_t, x i64) -> bool
+def sl_pq_remove (pqueue *sl_pq_t, x i64) -> bool
 begin
     var preds [20]node_ptr;
     var succs [20]node_ptr;
     var succ node_ptr;
     while true do
-        if false == find(set, x, preds, succs) then
+        if false == find(pqueue, x, preds, succs) then
             return false;
         fi
         var node_to_remove = succs[0];
@@ -140,7 +139,7 @@ begin
             marked = is_marked(succ);
             if i_marked_it then
                 retire succs[0];
-                find(set, x, preds, succs);
+                find(pqueue, x, preds, succs);
                 return true;
             elif marked then
                 return false;
@@ -152,13 +151,13 @@ end
 /** Remove a node, lock-free, from the skiplist.  Leak the memory.
  */
 export
-def sl_pq_leaky_remove (set *sl_pq_t, x i64) -> bool
+def sl_pq_leaky_remove (pqueue *sl_pq_t, x i64) -> bool
 begin
     var preds [20]node_ptr;
     var succs [20]node_ptr;
     var succ node_ptr;
     while true do
-        if false == find(set, x, preds, succs) then
+        if false == find(pqueue, x, preds, succs) then
             return false;
         fi
         var node_to_remove = succs[0];
@@ -184,7 +183,7 @@ begin
             succ = succs[0].next[0];
             marked = is_marked(succ);
             if i_marked_it then
-                find(set, x, preds, succs);
+                find(pqueue, x, preds, succs);
                 return true;
             elif marked then
                 return false;
@@ -197,17 +196,17 @@ end
  *  Leak the memory.
  */
 export
-def sl_pq_leaky_pop_min (set *sl_pq_t) -> bool
+def sl_pq_leaky_pop_min (pqueue *sl_pq_t) -> bool
 begin
     // FIXME: If "curr" from outside is used the code doesn't work.
-    for var curr = unmark(set.head.next[0]); curr != &set.tail; curr = unmark(curr.next[0]) do
+    for var curr = unmark(pqueue.head.next[0]); curr != &pqueue.tail; curr = unmark(curr.next[0]) do
         if curr.state == DELETED then
             continue;
         fi
         var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
         if res then 
             // Physically delete the node now.
-            return sl_pq_leaky_remove(set, curr.val);
+            return sl_pq_leaky_remove(pqueue, curr.priority);
         fi
     od
     return false;
@@ -217,17 +216,17 @@ end
  *  Don't leak the memory.
  */
 export
-def sl_pq_pop_min (set *sl_pq_t) -> bool
+def sl_pq_pop_min (pqueue *sl_pq_t) -> bool
 begin
     // FIXME: If "curr" from outside is used the code doesn't work.
-    for var curr = unmark(set.head.next[0]); curr != &set.tail; curr = unmark(curr.next[0]) do
+    for var curr = unmark(pqueue.head.next[0]); curr != &pqueue.tail; curr = unmark(curr.next[0]) do
         if curr.state == DELETED then
             continue;
         fi
         var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
         if res then 
             // Physically delete the node now.
-            var removed = sl_pq_leaky_remove(set, curr.val);
+            var removed = sl_pq_leaky_remove(pqueue, curr.priority);
             if removed then
                 retire unmark(curr);
             fi
@@ -239,15 +238,15 @@ end
 
 def fast_rand (seed *u64) -> u64
 begin
-    var val = seed[0];
-    if val == 0 then val = 1; fi
+    var priority = seed[0];
+    if priority == 0 then priority = 1; fi
 
-    val ^= val << 6;
-    val ^= val >> 21;
-    val ^= val << 7;
+    priority ^= priority << 6;
+    priority ^= priority >> 21;
+    priority ^= priority << 7;
 
-    seed[0] = val;
-    return val;
+    seed[0] = priority;
+    return priority;
 end
 
 def random_level (seed *u64, max u32) -> u32
@@ -259,8 +258,8 @@ begin
     return level - 1;
 end
 
-def find (set *sl_pq_t,
-          key i64,
+def find (pqueue *sl_pq_t,
+          priority i64,
           preds [20]node_ptr,
           succs [20]node_ptr) -> bool
 begin
@@ -268,7 +267,7 @@ begin
     var pred, curr, succ node_ptr = nil, nil, nil;
 retry:
     while true do
-        pred = &set.head;
+        pred = &pqueue.head;
         for var level = 19; level >= 0; --level do
             curr = unmark(pred.next[level]);
             while true do
@@ -279,7 +278,7 @@ retry:
                     curr = unmark(pred.next[level]);
                     { succ, marked } = ref_and_markbit(curr.next[level]);
                 od
-                if curr.val < key then
+                if curr.priority < priority then
                     pred = curr;
                     curr = succ;
                 else
@@ -289,7 +288,7 @@ retry:
             preds[level] = pred;
             succs[level] = curr;
         od
-        return curr.val == key;
+        return curr.priority == priority;
     od
 end
 
