@@ -122,7 +122,6 @@ begin
     xcase BT_TX: return "bt_tx";
     xcase _: return "unknown benchmark";
     esac
-    return "FIXME: need reachability detection after a switch.";
 end
 
 def string_of_policy (p memory_policy_t) -> *char
@@ -134,7 +133,6 @@ begin
     xcase POLICY_STACKTRACK: return "stacktrack";
     xcase _: return "unknown policy";
     esac
-    return "FIXME: need reachability detection after a switch.";
 end
 
 def help (bench *char) -> void
