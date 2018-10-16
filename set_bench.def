@@ -206,7 +206,7 @@ begin
                 fprintf(stderr, "error: -t requires an argument.\n");
                 exit(1);
             fi
-            config.thread_count = read_i32(1, 128, argv[i], "-t");
+            config.thread_count = read_i32(1, 256, argv[i], "-t");
         xcase "-d":
             ++i;
             if i >= argc then

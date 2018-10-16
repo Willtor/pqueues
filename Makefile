@@ -9,7 +9,7 @@ DEFFLAGS = $(OPTLEVEL) --ftransactions=hardware
 DEFLIBS = -lpthread -lm -lcpuinfo
 
 CC = clang
-CFLAGS = $(OPTLEVEL) -mrtm
+CFLAGS = $(OPTLEVEL) -g -mrtm
 
 DEF_SETS = \
 	fhsl_lf.def \
@@ -35,6 +35,7 @@ DEF_PQUEUES = \
 C_PQUEUES = \
 	c_sl_pq.c \
 	c_spray_pq.c \
+	c_spray_clean_pq.c \
 	c_spray_pq_tx.c \
 	c_lj_pq.c
 

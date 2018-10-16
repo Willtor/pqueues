@@ -203,6 +203,33 @@ static void restructure(c_lj_pq_t *pqueue) {
  */
 int c_lj_pq_leaky_pop_min(c_lj_pq_t * pqueue) {
   node_ptr cur = &pqueue->head, next = NULL, newhead = NULL,
+    obs_head = atomic_load_explicit(&cur->next[0], memory_order_relaxed);
+  int32_t offset = 0;
+  do {
+    offset++;
+    next = atomic_load_explicit(&cur->next[0], memory_order_consume);
+    if(unmark(next) == &pqueue->tail) { return false; }
+    if(newhead == NULL && atomic_load_explicit(&cur->insert_state, memory_order_relaxed) == INSERT_PENDING) { newhead = cur; }
+    if(is_marked(next)) { continue; }
+    // Yuck
+    next = atomic_fetch_or_explicit((_Atomic(uintptr_t)*)&cur->next[0], 1, memory_order_relaxed);
+  } while((cur = unmark(next)) && is_marked(next));
+  
+
+  if(newhead == NULL) { newhead = cur; }
+  if(offset <= pqueue->boundoffset) { return true; }
+  if(atomic_load_explicit(&pqueue->head.next[0], memory_order_relaxed) != obs_head) { return true; }
+
+  if(atomic_compare_exchange_weak_explicit(&pqueue->head.next[0], &obs_head, mark(newhead), memory_order_release, memory_order_relaxed)) {
+    restructure(pqueue);
+  }
+  return true;
+}
+
+/** Pop the front node from the list.  Return true iff there was a node to pop.
+ */
+int c_lj_pq_pop_min(c_lj_pq_t * pqueue) {
+  node_ptr cur = &pqueue->head, next = NULL, newhead = NULL,
     obs_head = NULL;
   int32_t offset = 0;
   obs_head = atomic_load_explicit(&cur->next[0], memory_order_consume);
@@ -223,6 +250,12 @@ int c_lj_pq_leaky_pop_min(c_lj_pq_t * pqueue) {
 
   if(atomic_compare_exchange_weak_explicit(&pqueue->head.next[0], &obs_head, mark(newhead), memory_order_release, memory_order_relaxed)) {
     restructure(pqueue);
+    cur = unmark(obs_head);
+    while (cur != unmark(newhead)) {
+      next = unmark(cur->next[0]);
+      forkscan_retire((void*) cur);
+      cur = next;
+    }
   }
   return true;
 }

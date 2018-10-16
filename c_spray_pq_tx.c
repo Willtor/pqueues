@@ -237,35 +237,180 @@ static int c_spray_pq_tx_remove(c_spray_pq_tx_t * pqueue, int64_t key) {
 
 
 int c_spray_pq_tx_pop_min_leaky(uint64_t *seed, c_spray_pq_tx_t *pqueue) {
-  node_ptr node_popped = NULL;
-  lock(pqueue->lock);
-  node_ptr head_node = pqueue->head.next[0];
-  if(head_node != &pqueue->tail) {
-    node_popped = head_node;
-    int64_t toplevel = node_popped->toplevel;
-    for(int64_t i = 0; i <= toplevel; i++) {
-      pqueue->head.next[i] = node_popped->next[i];
-    }
-  }
-  unlock(pqueue->lock);
-  // forkscan_retire((void*)node_popped);
-  return node_popped != NULL;
-//   lock(pqueue->lock);
-//   node_ptr node = spray(seed, pqueue);
-//   unlock(pqueue->lock);
+  // node_ptr node_popped = NULL;
+  // lock(pqueue->lock);
+  // node_ptr node = spray(seed, pqueue);
+  // unlock(pqueue->lock);
 
-//   for(; node != &pqueue->tail; node = node->next[0]) {
-//     state_t state = atomic_load_explicit(node->state, memory_order_relaxed);
-//     if(state == PADDING || state == DELETED) {
-//       continue;
-//     }
-//     if(state == ACTIVE && 
-//       (atomic_exchange_explicit(node->state, DELETED, memory_order_relaxed) == ACTIVE)) {
-//       bool _ = c_spray_pq_tx_remove_leaky(pqueue, node->key);
-//       return true;
-//     }
-//   }
-//   return false;
+  // bool cleaner = true;//false;//((fast_rand(seed) % pqueue->config.thread_count) == 0);
+  // retry:
+  // if(cleaner) {
+  //   // node_ptr preds[N], succs[N];
+  //   // find(pqueue, INT64_MAX - 1, preds, succs);
+  //   // cleaner = false;
+  //   // goto retry;
+
+  //   // Here. We. Go.
+  //   node_ptr lefts[N], left_nexts[N];
+  //   bool needs_swing[N];
+  //   lock(pqueue->lock);
+  //   for(int64_t i = N - 1; i >= BOTTOM; i--) {
+  //     lefts[i] = &pqueue->head;
+  //     left_nexts[i] = pqueue->head.next[i];
+  //     needs_swing[i] = false;
+  //   }
+  //   unlock(pqueue->lock);
+
+  //   bool claimed_node = false, in_prefix = false;
+  //   while(true) {
+  //     int64_t prefix_height = 0, valid_height = -1;
+  //     node_ptr right = node_unmark(left_nexts[BOTTOM]);
+  //     if(right == NULL) {
+  //       unlock(pqueue->lock);
+  //       return false;
+  //     }
+  //     in_prefix = false;
+  //     // TODO: Unmark?
+  //     node_ptr right_next = right->next[BOTTOM];
+  //     // Node scan...
+  //     while(true) {
+  //       node_ptr unmarked_right = node_unmark(right);
+  //       if(unmarked_right == &pqueue->tail) {
+  //         bool done = true;
+  //         for(int64_t i = 0; i < N; i++) {
+  //           if(needs_swing[i]) { done = false;}
+  //         }
+  //         // We don't need to swing any pointers and we've seen the tail.
+  //         if(done) { return false; }
+  //         valid_height = unmarked_right->toplevel;
+  //         break; 
+  //       }
+  //       state_t state = unmarked_right->state;
+  //       if(state == ACTIVE) {
+  //         if(!claimed_node) {
+  //           // Treat as another node to be discarded.
+  //           claimed_node = &unmarked_right->state, DELETED, memory_order_relaxed) == ACTIVE);
+  //           mark_pointers(unmarked_right);
+  //         } else {
+  //           // If we're in a prefix save the height of the found node
+  //           // so that we can swing it.
+  //           valid_height = unmarked_right->toplevel;
+  //           if(!in_prefix) {
+  //             // We're not in a prefix and we've found the most rightward
+  //             // valid node. Save it's address and the values of it's nexts.
+  //             // printf("Not in prefix, found a valid node.\n");
+  //             for(int64_t i = unmarked_right->toplevel; i >= BOTTOM; i--) {
+  //               if(!needs_swing[i]) {
+  //                 lefts[i] = unmarked_right;
+  //                 left_nexts[i] = atomic_load_explicit(&unmarked_right->next[i], memory_order_consume);
+  //               }
+  //             }
+  //           }
+  //           in_prefix = false;
+  //           break;
+  //         }
+  //       } else {
+  //         mark_pointers(right);
+  //       }
+  //       // In deleted prefix.
+  //       in_prefix = true;
+  //       // mark_pointers(right);
+  //       // The pointers at these levels need to move around this node.
+  //       for(int64_t i = 0; i <= unmarked_right->toplevel; i++) {
+  //         needs_swing[i] = true; 
+  //       }
+       
+  //       right = node_unmark(right_next);
+  //       right_next = atomic_load_explicit(&right->next[BOTTOM], memory_order_consume);
+  //     }
+  //     // Did we skip over anyone?
+  //     // Or, did we find someone or interest?
+  //     if(left_nexts[BOTTOM] != right_next || valid_height >= 0) {
+  //       // printf("SWINGING POINTER BOIS AROUND\n");
+  //       // c_spray_pq_print(pqueue);
+  //       // printf("LEFTS\n");
+  //       // for(int64_t i = 0; i < N; i++) {
+  //       //   print_node(lefts[i]);
+  //       // }
+  //       // printf("LEFT NEXT\n");
+  //       // for(int64_t i = 0; i < N; i++) {
+  //       //   print_node(left_nexts[i]);
+  //       // }
+  //       // printf("REPLACEMENT\n");
+  //       // print_node(right);
+  //       // printf("Valid height %ld\n", valid_height);
+  //       for(int64_t level = valid_height; level >= BOTTOM; level--) {
+  //         // assert(claimed_node);
+  //         if(needs_swing[level]) {
+  //           if(atomic_load_explicit(&node_unmark(left_nexts[level])->state, memory_order_relaxed) != DELETED) {
+  //             printf("%ld, %d, %ld\n", atomic_load_explicit(&node_unmark(left_nexts[level])->state, memory_order_relaxed), left_nexts[BOTTOM] != right_next, valid_height);
+  //           }
+  //           // assert(atomic_load_explicit(&node_unmark(left_nexts[level])->state, memory_order_relaxed) == DELETED);
+  //           bool success = atomic_compare_exchange_weak_explicit(&lefts[level]->next[level], &left_nexts[level], right,
+  //             memory_order_release, memory_order_relaxed);
+  //           if(success) {
+  //             lefts[level] = right;
+  //             left_nexts[level] =  atomic_load_explicit(&right->next[level], memory_order_consume);
+  //             needs_swing[level] = false;
+  //           } else if(claimed_node) {
+  //             // printf("AFTER failed CAS at level%ld\n", level);
+  //             // c_spray_pq_print(pqueue);
+  //             // assert(false);
+  //             return true;
+  //           } else {
+  //             // Someone interrupted our swinging in this deleted prefix 
+  //             // AND we don't have a claimed node. Try again.
+  //             goto retry;
+  //           }
+  //         }
+  //       }
+  //     } else { /*printf("NO CHANGES\n");*/ }
+  //     valid_height = -1;
+  //     bool done = true;
+  //     for(int64_t i = 0; i < N; i++) {
+  //       if(needs_swing[i]) { done = false;}
+  //     }
+  //     if(!done) { printf("More work to do\n"); continue; }
+
+  //     if(claimed_node) {
+  //       // printf("AFTER\n");
+  //       // c_spray_pq_print(pqueue);
+  //       // assert(false);
+  //       return true;
+  //     }
+  //   }
+  // } else {
+  //   node_ptr node = spray(seed, pqueue);
+  //   // If we're not passed the head yet, start just after there.
+  //   if(atomic_load_explicit(&node->state, memory_order_relaxed) == PADDING) {
+  //     node = atomic_load_explicit(&pqueue->head.next[0], memory_order_relaxed);
+  //   }
+  //   for(uint64_t i = 0; node != &pqueue->tail; node = node_unmark(atomic_load_explicit(&node->next[0], memory_order_relaxed)), i++) {
+  //     state_t state = atomic_load_explicit(&node->state, memory_order_relaxed);
+  //     if(state == PADDING || state == DELETED) {
+  //       continue;
+  //     }
+  //     if(state == ACTIVE && 
+  //       (atomic_exchange_explicit(&node->state, DELETED, memory_order_relaxed) == ACTIVE)) {
+  //       mark_pointers(node);
+  //       return true;
+  //     }
+  //   }
+  //   return false;
+  // }
+
+  // for(; node != &pqueue->tail; node = node->next[0]) {
+  //   state_t state = atomic_load_explicit(node->state, memory_order_relaxed);
+  //   if(state == PADDING || state == DELETED) {
+  //     continue;
+  //   }
+  //   if(state == ACTIVE && 
+  //     (atomic_exchange_explicit(node->state, DELETED, memory_order_relaxed) == ACTIVE)) {
+  //     bool _ = c_spray_pq_tx_remove_leaky(pqueue, node->key);
+  //     return true;
+  //   }
+  // }
+  // return false;
 }
 
 // int c_spray_pq_tx_pop_min(c_spray_pq_tx_t *pqueue) {
