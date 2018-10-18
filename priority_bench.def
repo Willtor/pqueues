@@ -20,6 +20,7 @@ import "c_spray_pq.h";
 import "c_spray_pq_tx.h";
 import "lj_pq.defi";
 import "c_lj_pq.h";
+import "mq_locked_btree.defi";
 
 typedef benchmark_t = enum
     | FHSL_LF
@@ -34,6 +35,7 @@ typedef benchmark_t = enum
     | C_SL_PQ
     | LJ_PQ
     | C_LJ_PQ
+    | MQ_LOCKED_BTREE
     ;
 
 typedef memory_policy_t = enum
@@ -126,6 +128,7 @@ begin
     xcase C_SL_PQ: return "c_sl_pq";
     xcase LJ_PQ: return "lj_pq";
     xcase C_LJ_PQ: return "c_lj_pq";
+    xcase MQ_LOCKED_BTREE: return "mq_locked_btree";
     xcase _: return "unknown benchmark";
     esac
 end
@@ -158,6 +161,7 @@ begin
     printf("     * c_spray_tx: Fixed-height skip list based priority pqueue written in C; transactional with spray delete min.\n");
     printf("     * lj_pq: Fixed-height skip list based priority queue; lock-free with Linden Jonsson delete min.\n");
     printf("     * c_lj_pq: Fixed-height skip list based priority pqueue written in C; lock-free with Linden Jonsson delete min.\n");
+    printf("     * mq_locked_btree: Multiqueue with a locked btree base.\n");
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
@@ -238,6 +242,7 @@ begin
             xcase "c_sl_pq": config.benchmark = C_SL_PQ;
             xcase "lj_pq": config.benchmark = LJ_PQ;
             xcase "c_lj_pq": config.benchmark = C_LJ_PQ;
+            xcase "mq_locked_btree": config.benchmark = MQ_LOCKED_BTREE;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
                 exit(1);
@@ -308,6 +313,7 @@ begin
     ocase { LJ_PQ, POLICY_LEAKY }:
     ocase { LJ_PQ, POLICY_RETIRE }:
     ocase { C_LJ_PQ, POLICY_LEAKY }:
+    ocase { MQ_LOCKED_BTREE, _ }:
     xcase _:
         printf("Unsupported configuration:\n");
         printf("  benchmark: %s\n  policy: %s\n",
@@ -665,6 +671,24 @@ begin
                 fi
             fi
 
+/***************************************************************************/
+/*                    Multiqueue based on locked btrees.                   */
+/***************************************************************************/
+
+        xcase MQ_LOCKED_BTREE:
+            if insert_action then
+                ++stats.insert_attempts;
+                mq_locked_btree_add(&seed, pqueue, val);
+                ++stats.insert_successes;
+                insert_action = false;
+            else
+                ++stats.remove_attempts;
+                if mq_locked_btree_pop_min(&seed, pqueue) then
+                    ++stats.remove_successes;
+                    insert_action = true;
+                fi
+            fi
+
         xcase _:
             printf("error: unknown benchmark configuration.\n");
             exit(1);
@@ -716,6 +740,9 @@ begin
             res = lj_pq_add(&seed, config.pqueue, val);
         xcase C_LJ_PQ:
             res = c_lj_pq_add(&seed, config.pqueue, val) == 1;
+        xcase MQ_LOCKED_BTREE:
+            mq_locked_btree_add(&seed, config.pqueue, val);
+            res = true;
         xcase _:
             printf("error: unable to initialize unknown pqueue.\n");
             exit(1);
@@ -754,11 +781,13 @@ begin
         config.pqueue = lj_pq_create(config.thread_count);
     xcase C_LJ_PQ:
         config.pqueue = c_lj_pq_create(config.thread_count);
+    xcase MQ_LOCKED_BTREE:
+        config.pqueue = mq_locked_btree_create(/*FIXME*/4);
     xcase _:
         printf("error: unable to initialize unknown pqueue.\n");
         exit(1);
     esac
-    
+
     var max_threads = get_num_cores();
     if max_threads > 16 then
         max_threads = 16;
