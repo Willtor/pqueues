@@ -337,6 +337,12 @@ begin
     return peek_min(btree.root);
 end
 
+export
+def serial_btree_is_empty (btree *serial_btree) -> bool
+begin
+    return btree.root.n == 0;
+end
+
 def peek_min (node *node) -> i64
 begin
     if node.is_leaf then

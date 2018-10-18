@@ -1,0 +1,146 @@
+import "serial_btree.defi";
+
+typedef set =
+    { lock volatile u64,
+      btree *serial_btree
+    };
+
+export opaque
+typedef mq_locked_btree =
+    { count i32,
+      sets  [1024]set
+    };
+
+/****************************************************************************/
+/*                                Multiqueue                                */
+/****************************************************************************/
+
+/** Create a new multiqueue with n subqueues.
+ */
+export
+def mq_locked_btree_create (n i32) -> *mq_locked_btree
+begin
+    var mq = new mq_locked_btree;
+    mq.count = n;
+    for var i = 0; i < n; ++i do
+        mq.sets[i].lock = 0;
+        mq.sets[i].btree = serial_btree_create();
+    od
+    return mq;
+end
+
+/** Destroy a multiqueue.
+ */
+export
+def mq_locked_btree_destroy (mq *mq_locked_btree) -> void
+begin
+    for var i = 0; i < mq.count; ++i do
+        serial_btree_destroy(mq.sets[i].btree);
+    od
+    delete mq;
+end
+
+/** Add a value to the multiqueue.  This always succeeds because this
+ *  implementation allows duplicate values.
+ */
+export
+def mq_locked_btree_add (seed *u64, mq *mq_locked_btree, val i64) -> void
+begin
+    var a = random_val(seed, mq.count);
+    tts_lock(&mq.sets[a].lock);
+    serial_btree_insert(mq.sets[a].btree, val);
+    tts_unlock(&mq.sets[a].lock);
+end
+
+/** Remove the minimum value.  There is no leaky version.
+ */
+export
+def mq_locked_btree_pop_min (seed *u64, mq *mq_locked_btree) -> bool
+begin
+    var { a, b } = pick_two(seed, mq.count);
+    var popped = false;
+
+    tts_lock(&mq.sets[a].lock); // Ordered to avoid deadlock. a < b
+    tts_lock(&mq.sets[b].lock);
+
+    var abtree = mq.sets[a].btree;
+    var bbtree = mq.sets[b].btree;
+
+    if !serial_btree_is_empty(abtree) then
+        if !serial_btree_is_empty(bbtree) then
+            var amin = serial_btree_peek_min(abtree);
+            var bmin = serial_btree_peek_min(bbtree);
+            if amin <= bmin then
+                serial_btree_remove(abtree, amin);
+            else
+                serial_btree_remove(bbtree, bmin);
+            fi
+        else
+            serial_btree_remove(abtree,
+                                serial_btree_peek_min(abtree));
+        fi
+        popped = true;
+    else
+        if !serial_btree_is_empty(bbtree) then
+            serial_btree_remove(bbtree,
+                                serial_btree_peek_min(bbtree));
+            popped = true;
+        fi
+    fi
+
+    tts_unlock(&mq.sets[a].lock);
+    tts_unlock(&mq.sets[b].lock);
+
+    return popped;
+end
+
+def pick_two (seed *u64, max i32) -> { u64, u64 }
+begin
+    var m = random_val(seed, max);
+    var n = random_val(seed, max);
+    if m == n then
+        n > 0 ? --n : ++n;
+    fi
+    return m < n ? { m, n } : { n, m };
+end
+
+/****************************************************************************/
+/*                                  Random                                  */
+/****************************************************************************/
+
+def fast_rand (seed *u64) -> u64
+begin
+    var key = seed[0];
+    if key == 0 then key = 1; fi
+
+    key ^= key << 6;
+    key ^= key >> 21;
+    key ^= key << 7;
+
+    seed[0] = key;
+    return key;
+end
+
+def random_val (seed *u64, max u64) -> u64
+begin
+    return fast_rand(seed) % max;
+end
+
+/****************************************************************************/
+/*                                 TTS Lock                                 */
+/****************************************************************************/
+
+def tts_lock (lock volatile *u64) -> void
+begin
+    while true do
+        while 1 == lock[0] do od
+        if 0 == __builtin_swap(lock, 1U64) then // FIXME: Need implicit cast.
+            return;
+        fi
+    od
+end
+
+def tts_unlock (lock *u64) -> void
+begin
+    lock[0] = 0;
+end
