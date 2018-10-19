@@ -72,7 +72,7 @@ end
 export
 def serial_btree_create () -> *serial_btree
 begin
-    var root = cast(type *node, make_leaf());
+    var root = cast *node (make_leaf());
     var btree = new serial_btree { root : root };
     return btree;
 end

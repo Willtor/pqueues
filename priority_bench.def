@@ -95,8 +95,8 @@ begin
         fprintf(stderr, "fatal: clock failed.\n");
         exit(1);
     fi
-    var sec = cast(type f64, ts.tv_sec);
-    var nsec = cast(type f64, ts.tv_nsec);
+    var sec = cast f64 (ts.tv_sec);
+    var nsec = cast f64 (ts.tv_nsec);
     return sec + nsec / (1000.0 * 1000.0 * 1000.0);
 end
 
@@ -341,7 +341,7 @@ end
 def success_rate (attempts i64, successes i64) -> f64
 begin
     if attempts == 0 then return 0.0F64; fi
-    return cast(type f64, successes) * 100.0F64 / cast(type f64, attempts);
+    return cast f64 (successes) * 100.0F64 / cast f64 (attempts);
 end
 
 def print_stats (stats *stats_t, runtime f64) -> void
@@ -351,18 +351,18 @@ begin
     printf("  insert-successes   : %lld (%.1f%%)\n", stats.insert_successes,
            success_rate(stats.insert_attempts, stats.insert_successes));
     printf("  inserts-per-second : %lld\n",
-           cast(type i64, stats.insert_successes / runtime));
+           cast i64 (stats.insert_successes / runtime));
     printf("  remove-attempts    : %lld\n", stats.remove_attempts);
     printf("  remove-successes   : %lld (%.1f%%)\n", stats.remove_successes,
            success_rate(stats.remove_attempts, stats.remove_successes));
     printf("  removes-per-second : %lld\n",
-           cast(type i64, stats.remove_successes / runtime));
+           cast i64 (stats.remove_successes / runtime));
 
     total_ops = stats.insert_successes + stats.remove_successes;
 
     printf("  total-operations   : %lld\n", total_ops);
     printf("  ops-per-second     : %lld\n",
-           cast(type i64, total_ops / runtime));
+           cast i64 (total_ops / runtime));
 end
 
 def print_csv (config *config_t, stats *stats_t, runtime f64) -> void
@@ -377,13 +377,13 @@ begin
            config.thread_count,
            config.init_size,
            config.upper_bound,
-           cast(type i64, total_ops / runtime));
+           cast i64 (total_ops / runtime));
 end
 
 def thread (arg *void) -> *void
 begin
-    var seed = cast(type u64, time(nil));
-    var ptd = cast(type volatile *per_thread_data_t, arg);
+    var seed = cast u64 (time(nil));
+    var ptd = cast volatile *per_thread_data_t (arg);
     var stats stats_t = { 0, 0, 0, 0 };
     var config *config_t = ptd.config;
     var bench = config.benchmark;
@@ -703,9 +703,9 @@ end
 
 def thread_initialise(arg *void) -> *void 
 begin
-    var thread_data *init_thread_data_t = cast(type *init_thread_data_t, arg);
+    var thread_data *init_thread_data_t = cast *init_thread_data_t (arg);
     var config *config_t = thread_data.config;
-    var seed u64 = cast(type u64, time(nil)) + thread_data.id;
+    var seed u64 = cast u64 (time(nil)) + thread_data.id;
     var bound = config.init_size;
     var thread_slice = bound / thread_data.total_threads;
     var extra = bound % thread_data.total_threads;
@@ -821,7 +821,7 @@ def main (argc i32, argv **char) -> i32
 begin
     
     var config = read_args(argc, argv);
-    var seed = cast(type u64, time(nil));
+    var seed = cast u64 (time(nil));
     var state = STATE_WAIT;
 
     forkscan_set_allocator(malloc, free, malloc_usable_size);

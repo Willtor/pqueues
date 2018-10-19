@@ -362,10 +362,10 @@ def ref_and_markbit (ptr node_ptr) -> { node_ptr, bool } =
     { unmark(ptr), is_marked(ptr) };
 
 def mark (ptr node_ptr) -> node_ptr =
-    cast(type node_ptr, 0x1I64 | cast(type i64, ptr));
+    cast node_ptr (0x1I64 | cast i64 (ptr));
 
 def unmark (ptr node_ptr) -> node_ptr =
-    cast(type node_ptr, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
+    cast node_ptr (0xFFFFFFFFFFFFFFFEI64 & cast i64 (ptr));
 
 def is_marked (ptr node_ptr) -> bool =
-    cast(type bool, 0x1I64 & cast(type i64, ptr));
+    cast bool (0x1I64 & cast i64 (ptr));

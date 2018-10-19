@@ -51,38 +51,38 @@ end
 
 def node_address(node node_ptr) -> node_ptr
 begin
-    return cast(type node_ptr, (cast(type size_t, node) >> 2) << 2);
+    return cast node_ptr ((cast size_t (node) >> 2) << 2);
 end
 
 def node_flag(node node_ptr, flag bool) -> node_ptr
 begin
     if flag then
-        return cast(type node_ptr, cast(type size_t, node) | 0x1);
+        return cast node_ptr (cast size_t (node) | 0x1);
     else
-        return cast(type node_ptr, (cast(type size_t, node) >> 1) << 1);
+        return cast node_ptr ((cast size_t (node) >> 1) << 1);
     fi
 end
 
 def node_is_flagged(node node_ptr) -> bool
 begin
-    return (cast(type size_t, node) & 0x1) == 1;
+    return (cast size_t (node) & 0x1) == 1;
 end
 
 def node_tag(node node_ptr, tag bool) -> node_ptr
 begin
     if tag then
-        return cast(type node_ptr, cast(type size_t, node) | 0x2);
+        return cast node_ptr (cast size_t (node) | 0x2);
     else
         var is_flagged = node_is_flagged(node);
-        var new_node = cast(type node_ptr, 
-            (cast(type size_t, node) >> 2) << 2);
+        var new_node = cast node_ptr (
+            (cast size_t (node) >> 2) << 2);
         return node_flag(new_node, is_flagged);
     fi
 end 
 
 def node_is_tagged(node node_ptr) -> bool
 begin
-    return (cast(type size_t, node) & 0x2) == 2;
+    return (cast size_t (node) & 0x2) == 2;
 end
 
 def node_pack(node node_ptr, flag bool, tag bool) -> node_ptr
@@ -192,7 +192,7 @@ begin
         sibling_address = child_address;
     fi    
 
-    fetch_and_or(cast(type *u64, sibling_address), 2);
+    fetch_and_or(cast *u64 (sibling_address), 2);
     var unpacked_sibbling node_unpacked_t = 
         node_unpack(sibling_address[0]);
     var res = __builtin_cas(successor_address, node_address(successor),
