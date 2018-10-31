@@ -36,7 +36,6 @@ DEF_PQUEUES = \
 C_PQUEUES = \
 	c_sl_pq.c \
 	c_spray_pq.c \
-	c_spray_clean_pq.c \
 	c_spray_pq_tx.c \
 	c_lj_pq.c
 

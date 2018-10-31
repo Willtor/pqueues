@@ -114,37 +114,43 @@ static int32_t random_level (uint64_t *seed, int32_t max) {
 static bool find(c_fhsl_lf_t *set, int64_t key, 
   node_ptr preds[N], node_ptr succs[N]) {
   bool marked, snip;
-  node_ptr pred = NULL, curr = NULL, succ = NULL;
+  // node_ptr pred = NULL, curr = NULL, succ = NULL;
 retry:
   while(true) {
-    pred = &set->head;
+    node_ptr left = &set->head, right = NULL;
     for(int64_t level = N - 1; level >= BOTTOM; --level) {
-      curr = node_unmark(atomic_load_explicit(&pred->next[level], memory_order_consume));
+      node_ptr left_next = atomic_load_explicit(&left->next[level], memory_order_consume);
+      // Is our current node invalid?
+      if(node_is_marked(left_next)) { goto retry; }
+      node_ptr right = left_next;
+      // Find two nodes to put into preds and succs.
       while(true) {
-        node_ptr raw_node = atomic_load_explicit(&curr->next[level], memory_order_consume);
-        marked = node_is_marked(raw_node);
-        succ = node_unmark(raw_node);
-        while(marked) {
-          snip = atomic_compare_exchange_weak_explicit(&pred->next[level], &curr, succ, memory_order_release, memory_order_consume);
-          if(!snip) {
-            goto retry;
-          }
-          // Curr is reloaded from CAS.
-          raw_node = atomic_load_explicit(&curr->next[level], memory_order_consume);
-          marked = node_is_marked(raw_node);
-          succ = node_unmark(raw_node);
+        // Scan to the right so long as we find deleted nodes.
+        node_ptr right_next = atomic_load_explicit(&right->next[level], memory_order_consume);
+        while(node_is_marked(right_next)) {
+          right = node_unmark(right_next);
+          right_next = atomic_load_explicit(&right->next[level], memory_order_consume);
         }
-        if(curr->key < key) {
-          pred = curr;
-          curr = succ;
+        // Has the right not gone far enough?        
+        if(right->key < key) {
+          left = right;
+          left_next = right_next;
+          right = right_next;
         } else {
+          // Right node is greater than our key, he's our succ, break.
           break;
         }
       }
-      preds[level] = pred;
-      succs[level] = curr;
+      // Ensure the left node points to the right node, they must be adjacent.
+      if(left_next != right) {
+        bool success = atomic_compare_exchange_weak_explicit(&left->next[level], &left_next, right,
+          memory_order_release, memory_order_relaxed);
+        if(!success) { goto retry; }
+      }
+      preds[level] = left;
+      succs[level] = right;
     }
-    return curr->key == key;
+    return succs[BOTTOM]->key == key;
   }
 }
 

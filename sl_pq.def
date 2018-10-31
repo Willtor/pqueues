@@ -198,15 +198,16 @@ end
 export
 def sl_pq_leaky_pop_min (pqueue *sl_pq_t) -> bool
 begin
-    // FIXME: If "curr" from outside is used the code doesn't work.
     for var curr = unmark(pqueue.head.next[0]); curr != &pqueue.tail; curr = unmark(curr.next[0]) do
         if curr.state == DELETED then
+            mark_pointers(curr);
             continue;
         fi
+        // TODO: Swap out for atomic swap
         var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
-        if res then 
-            // Physically delete the node now.
-            return sl_pq_leaky_remove(pqueue, curr.priority);
+        if res then
+            mark_pointers(curr);
+            return true;
         fi
     od
     return false;
@@ -218,18 +219,16 @@ end
 export
 def sl_pq_pop_min (pqueue *sl_pq_t) -> bool
 begin
-    // FIXME: If "curr" from outside is used the code doesn't work.
     for var curr = unmark(pqueue.head.next[0]); curr != &pqueue.tail; curr = unmark(curr.next[0]) do
         if curr.state == DELETED then
+            mark_pointers(curr);
             continue;
         fi
+        // TODO: Swap out for atomic swap
         var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
-        if res then 
-            // Physically delete the node now.
-            var removed = sl_pq_leaky_remove(pqueue, curr.priority);
-            if removed then
-                retire unmark(curr);
-            fi
+        if res then
+            mark_pointers(curr);
+            retire curr;
             return true;
         fi
     od
@@ -264,32 +263,52 @@ def find (pqueue *sl_pq_t,
           succs [20]node_ptr) -> bool
 begin
     var marked, snip bool;
-    var pred, curr, succ node_ptr = nil, nil, nil;
+    var left, succ node_ptr = nil, nil;
 retry:
     while true do
-        pred = &pqueue.head;
+        left = &pqueue.head;
         for var level = 19; level >= 0; --level do
-            curr = unmark(pred.next[level]);
+            var left_next = left.next[level];
+            if is_marked(left_next) then goto retry; fi
+            var right = left_next;
             while true do
-                { succ, marked } = ref_and_markbit(curr.next[level]);
-                while marked do
-                    snip = __builtin_cas(&pred.next[level], curr, succ);
-                    if !snip then goto retry; fi
-                    curr = unmark(pred.next[level]);
-                    { succ, marked } = ref_and_markbit(curr.next[level]);
+                var right_next = right.next[level];
+                while is_marked(right_next) do
+                    right = unmark(right_next);
+                    right_next = right.next[level];
                 od
-                if curr.priority < priority then
-                    pred = curr;
-                    curr = succ;
+                if right.priority < priority then
+                    left = right;
+                    left_next = right_next;
+                    right = right_next;
                 else
                     break;
                 fi
             od
-            preds[level] = pred;
-            succs[level] = curr;
+            if left_next != right then
+                var success = __builtin_cas(&left.next[level], left_next, right);
+                if !success then goto retry; fi
+            fi
+            preds[level] = left;
+            succs[level] = right;
         od
-        return curr.priority == priority;
+        return succs[0].priority == priority;
     od
+end
+
+def mark_pointers(node node_ptr) -> void
+begin
+  var unmarked_node node_ptr = unmark(node);
+  for var level = unmarked_node.toplevel; level >= 0; --level do
+    while true do
+      var succ node_ptr = unmarked_node.next[level];
+      if succ == nil  then break; fi
+      var marked = is_marked(succ);
+      if marked then break; fi
+      var success bool = __builtin_cas(&unmarked_node.next[level], succ, mark(succ));
+      if success then break; fi
+    od
+  od
 end
 
 def ref_and_markbit (ptr node_ptr) -> { node_ptr, bool } =

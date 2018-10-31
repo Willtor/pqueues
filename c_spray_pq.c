@@ -360,7 +360,6 @@ static node_ptr spray(uint64_t * seed, c_spray_pq_t * pqueue) {
 int c_spray_pq_leaky_pop_min(uint64_t *seed, c_spray_pq_t *pqueue) {
 
   bool cleaner = ((fast_rand(seed) % (pqueue->config.thread_count)) == 0);
-retry:
   if(cleaner) {
     node_ptr left = &pqueue->head;
     node_ptr left_next = atomic_load_explicit(&pqueue->head.next[BOTTOM], memory_order_relaxed);

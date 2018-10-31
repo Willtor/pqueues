@@ -59,6 +59,7 @@ begin
     return fhsl_lf;
 end
 
+
 /** Return whether the skip list contains the value.
  */
 export
@@ -330,31 +331,36 @@ def find (set *fhsl_lf,
           succs [20]node_ptr) -> bool
 begin
     var marked, snip bool;
-    var pred, curr, succ node_ptr = nil, nil, nil;
+    var left, succ node_ptr = nil, nil;
 retry:
     while true do
-        pred = &set.head;
+        left = &set.head;
         for var level = 19; level >= 0; --level do
-            curr = unmark(pred.next[level]);
+            var left_next = left.next[level];
+            if is_marked(left_next) then goto retry; fi
+            var right = left_next;
             while true do
-                { succ, marked } = ref_and_markbit(curr.next[level]);
-                while marked do
-                    snip = __builtin_cas(&pred.next[level], curr, succ);
-                    if !snip then goto retry; fi
-                    curr = unmark(pred.next[level]);
-                    { succ, marked } = ref_and_markbit(curr.next[level]);
+                var right_next = right.next[level];
+                while is_marked(right_next) do
+                    right = unmark(right_next);
+                    right_next = right.next[level];
                 od
-                if curr.key < key then
-                    pred = curr;
-                    curr = succ;
+                if right.key < key then
+                    left = right;
+                    left_next = right_next;
+                    right = right_next;
                 else
                     break;
                 fi
             od
-            preds[level] = pred;
-            succs[level] = curr;
+            if left_next != right then
+                var success = __builtin_cas(&left.next[level], left_next, right);
+                if !success then goto retry; fi
+            fi
+            preds[level] = left;
+            succs[level] = right;
         od
-        return curr.key == key;
+        return succs[0].key == key;
     od
 end
 

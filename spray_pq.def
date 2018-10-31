@@ -259,44 +259,109 @@ end
 export
 def spray_pq_pop_min (seed *u64, pqueue *spray_pq_t) -> bool
 begin
-  
-  for var node = spray(seed, pqueue); node != &pqueue.tail; node = unmark(node.next[0]) do
-    
-    // Spray failed, try again
-    if node.state == PADDING || node.state == DELETED then
-      continue;
+  var cleaner bool = (fast_rand(seed) % pqueue.config.thread_count) == 0;
+  if cleaner then
+    var claimed_node bool = false;
+    var left, left_next = &pqueue.head, pqueue.head.next[0];
+    var right = left_next;
+    for ; right != &pqueue.tail; right = unmark(right.next[0]) do
+        if right.state == DELETED then
+            mark_pointers(right);
+            continue;
+        elif right.state == ACTIVE then
+            if !claimed_node then
+                // TODO: Swap out for atomic swap
+                claimed_node = __builtin_cas(&right.state, ACTIVE, DELETED);
+                if claimed_node then
+                    retire right;
+                fi
+                mark_pointers(right);
+                continue;
+            fi
+            if pqueue.head.next[0] == left_next then
+                __builtin_cas(&left.next[0], left_next, right);
+            fi
+            return true;
+        fi
+    od
+    if pqueue.head.next[0] == left_next then
+        __builtin_cas(&left.next[0], left_next, right);
     fi
+    return claimed_node;
+  else
+    var node = spray(seed, pqueue);
+    if node.state == PADDING then
+        node = pqueue.head.next[0];
+    fi
+    for ; node != &pqueue.tail; node = unmark(node.next[0]) do  
+        // Spray failed, try again
+        if node.state == DELETED then
+            mark_pointers(node);
+            continue;
+        fi
 
-    var res = __builtin_cas(&node.state, ACTIVE, DELETED);
-    // We didn't delete a node from the list.
-    if res then
-      var removed = spray_pq_leaky_remove(pqueue, node.priority);
-      if removed then retire node; fi
-      return true;
-    fi
-  od
-  return false;
+        var res = __builtin_cas(&node.state, ACTIVE, DELETED);
+        if res then
+            mark_pointers(node);
+            retire node;
+            return true;
+        fi
+    od
+    return false;
+  fi
 end
 
 /** Remove a node, lock-free, from the skiplist.  Leak the memory.
  */
 export
 def spray_pq_leaky_pop_min (seed *u64, pqueue *spray_pq_t) -> bool
-begin  
-  for var node = spray(seed, pqueue); node != &pqueue.tail; node = unmark(node.next[0]) do
-    
-    // Spray failed, try again
-    if node.state == PADDING || node.state == DELETED then
-      continue;
+begin
+  var cleaner bool = (fast_rand(seed) % pqueue.config.thread_count) == 0;
+  if cleaner then
+    var claimed_node bool = false;
+    var left, left_next = &pqueue.head, pqueue.head.next[0];
+    var right = left_next;
+    for ; right != &pqueue.tail; right = unmark(right.next[0]) do
+        if right.state == DELETED then
+            mark_pointers(right);
+            continue;
+        elif right.state == ACTIVE then
+            if !claimed_node then
+                // TODO: Swap out for atomic swap
+                claimed_node = __builtin_cas(&right.state, ACTIVE, DELETED);
+                mark_pointers(right);
+                continue;
+            fi
+            if pqueue.head.next[0] == left_next then
+                __builtin_cas(&left.next[0], left_next, right);
+            fi
+            return true;
+        fi
+    od
+    if pqueue.head.next[0] == left_next then
+        __builtin_cas(&left.next[0], left_next, right);
     fi
+    return claimed_node;
+  else
+    var node = spray(seed, pqueue);
+    if node.state == PADDING then
+        node = pqueue.head.next[0];
+    fi
+    for ; node != &pqueue.tail; node = unmark(node.next[0]) do  
+        // Spray failed, try again
+        if node.state == DELETED then
+            mark_pointers(node);
+            continue;
+        fi
 
-    var res = __builtin_cas(&node.state, ACTIVE, DELETED);
-    // We didn't delete a node from the list.
-    if res then
-      return spray_pq_leaky_remove(pqueue, node.priority);
-    fi
-  od
-  return false;
+        var res = __builtin_cas(&node.state, ACTIVE, DELETED);
+        if res then
+            mark_pointers(node);
+            return true;
+        fi
+    od
+    return false;
+  fi
 end
 
 def fast_rand (seed *u64) -> u64
@@ -340,35 +405,58 @@ begin
   return cur_node;
 end 
 
-def find (pqueue *spray_pq_t, priority i64, preds [20]node_ptr, succs [20]node_ptr) -> bool
+def find (pqueue *spray_pq_t,
+          priority i64,
+          preds [20]node_ptr,
+          succs [20]node_ptr) -> bool
 begin
     var marked, snip bool;
-    var pred, curr, succ node_ptr = nil, nil, nil;
+    var left, succ node_ptr = nil, nil;
 retry:
     while true do
-        pred = &pqueue.head;
+        left = &pqueue.head;
         for var level = 19; level >= 0; --level do
-            curr = unmark(pred.next[level]);
+            var left_next = left.next[level];
+            if is_marked(left_next) then goto retry; fi
+            var right = left_next;
             while true do
-                { succ, marked } = ref_and_markbit(curr.next[level]);
-                while marked do
-                    snip = __builtin_cas(&pred.next[level], curr, succ);
-                    if !snip then goto retry; fi
-                    curr = unmark(pred.next[level]);
-                    { succ, marked } = ref_and_markbit(curr.next[level]);
+                var right_next = right.next[level];
+                while is_marked(right_next) do
+                    right = unmark(right_next);
+                    right_next = right.next[level];
                 od
-                if curr.priority < priority then
-                    pred = curr;
-                    curr = succ;  
+                if right.priority < priority then
+                    left = right;
+                    left_next = right_next;
+                    right = right_next;
                 else
                     break;
                 fi
             od
-            preds[level] = pred;
-            succs[level] = curr;
+            if left_next != right then
+                var success = __builtin_cas(&left.next[level], left_next, right);
+                if !success then goto retry; fi
+            fi
+            preds[level] = left;
+            succs[level] = right;
         od
-        return curr.priority == priority;
+        return succs[0].priority == priority;
     od
+end
+
+def mark_pointers(node node_ptr) -> void
+begin
+  var unmarked_node node_ptr = unmark(node);
+  for var level = unmarked_node.toplevel; level >= 0; --level do
+    while true do
+      var succ node_ptr = unmarked_node.next[level];
+      if succ == nil  then break; fi
+      var marked = is_marked(succ);
+      if marked then break; fi
+      var success bool = __builtin_cas(&unmarked_node.next[level], succ, mark(succ));
+      if success then break; fi
+    od
+  od
 end
 
 def ref_and_markbit (ptr node_ptr) -> { node_ptr, bool } =
