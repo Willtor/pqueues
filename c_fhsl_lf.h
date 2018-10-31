@@ -2,8 +2,6 @@
 
 #include <stdint.h>
 
-#define N 20
-
 typedef struct c_fhsl_lf_t c_fhsl_lf_t;
 
 c_fhsl_lf_t * c_fhsl_lf_create();

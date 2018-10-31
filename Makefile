@@ -9,7 +9,7 @@ DEFFLAGS = $(OPTLEVEL) --ftransactions=hardware
 DEFLIBS = -lpthread -lm -lcpuinfo
 
 CC = clang
-CFLAGS = $(OPTLEVEL) -g -mrtm
+CFLAGS = $(OPTLEVEL) -mrtm
 
 DEF_SETS = \
 	fhsl_lf.def \

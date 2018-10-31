@@ -39,8 +39,6 @@ struct c_spray_pq_t {
   config_t config;
   node_ptr padding_head;
   node_t head, tail;
-  atomic_bool cleaner_lock;
-  pthread_spinlock_t lock;
 };
 
 
@@ -143,8 +141,6 @@ c_spray_pq_t* c_spray_pq_create(int64_t threads) {
     }
     spray_pq->padding_head = node;
   }
-  atomic_store_explicit(&spray_pq->cleaner_lock, false, memory_order_relaxed);
-  pthread_spin_init(&spray_pq->lock, PTHREAD_PROCESS_PRIVATE);
   return spray_pq;
 }
 
@@ -366,10 +362,6 @@ int c_spray_pq_leaky_pop_min(uint64_t *seed, c_spray_pq_t *pqueue) {
   bool cleaner = ((fast_rand(seed) % (pqueue->config.thread_count)) == 0);
 retry:
   if(cleaner) {
-    // bool locked = atomic_load_explicit(&pqueue->cleaner_lock, memory_order_relaxed);
-    // if(locked) { cleaner = false; goto retry; }
-    // if(atomic_exchange_explicit(&pqueue->cleaner_lock, true, memory_order_acquire) == true) { cleaner = false; goto retry; }
-
     node_ptr left = &pqueue->head;
     node_ptr left_next = atomic_load_explicit(&pqueue->head.next[BOTTOM], memory_order_relaxed);
     assert(!node_is_marked(left_next));
@@ -382,25 +374,16 @@ retry:
         if(!claimed_node) {
           claimed_node = (atomic_exchange_explicit(&right->state, DELETED, memory_order_relaxed) == ACTIVE);
           mark_pointers(right);
-          claimed_node = true;
           continue;
         }
         if(atomic_load_explicit(&pqueue->head.next[BOTTOM], memory_order_relaxed) == left_next) {
           atomic_compare_exchange_weak_explicit(&left->next[BOTTOM], &left_next, right, memory_order_release, memory_order_relaxed);
         }
-        node_ptr preds[N], succs[N];
-        find(pqueue, right->key, preds, succs);
-        // atomic_store_explicit(&pqueue->cleaner_lock, false, memory_order_release);
         return true;
       }
     }
     if(atomic_load_explicit(&pqueue->head.next[BOTTOM], memory_order_relaxed) == left_next) {
       atomic_compare_exchange_weak_explicit(&left->next[BOTTOM], &left_next, right, memory_order_release, memory_order_relaxed);
-    }
-    // atomic_store_explicit(&pqueue->cleaner_lock, false, memory_order_release);
-    if(claimed_node) {
-      node_ptr preds[N], succs[N];
-      find(pqueue, right->key, preds, succs);
     }
     return claimed_node;
   } else {
