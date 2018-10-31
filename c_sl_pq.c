@@ -10,7 +10,10 @@
 #include <stdatomic.h>
 #include <forkscan.h>
 #include <stdio.h>
+#include <assert.h>
 
+#define N 20
+#define BOTTOM 0
 
 typedef struct node_t node_t; 
 typedef node_t *node_ptr;
@@ -103,40 +106,63 @@ static int32_t random_level (uint64_t *seed, int32_t max) {
   return level - 1;
 }
 
+
+static void mark_pointers(node_ptr node) {
+  node_ptr unmarked_node = node_unmark(node);
+  assert(atomic_load_explicit(&node->deleted, memory_order_relaxed));
+  for(int64_t level = unmarked_node->toplevel; level >= BOTTOM; --level) {
+    while(true) {
+      node_ptr succ = atomic_load_explicit(&unmarked_node->next[level], memory_order_relaxed);
+      bool marked = node_is_marked(succ);
+      if(marked) { break; }
+      node_ptr temp = succ;
+      bool success = atomic_compare_exchange_weak_explicit(&unmarked_node->next[level],
+        &temp, node_mark(succ), memory_order_relaxed, memory_order_relaxed);
+      if(success) { break; }
+    }
+  }
+}
+
 static bool find(c_sl_pq_t *pqueue, int64_t key, 
   node_ptr preds[N], node_ptr succs[N]) {
   bool marked, snip;
-  node_ptr pred = NULL, curr = NULL, succ = NULL;
+  // node_ptr pred = NULL, curr = NULL, succ = NULL;
 retry:
   while(true) {
-    pred = &pqueue->head;
-    for(int64_t level = N - 1; level >= 0; --level) {
-      curr = node_unmark(atomic_load_explicit(&pred->next[level], memory_order_consume));
+    node_ptr left = &pqueue->head, right = NULL;
+    for(int64_t level = N - 1; level >= BOTTOM; --level) {
+      node_ptr left_next = atomic_load_explicit(&left->next[level], memory_order_consume);
+      // Is our current node invalid?
+      if(node_is_marked(left_next)) { goto retry; }
+      node_ptr right = left_next;
+      // Find two nodes to put into preds and succs.
       while(true) {
-        node_ptr raw_node = atomic_load_explicit(&curr->next[level], memory_order_consume);
-        marked = node_is_marked(raw_node);
-        succ = node_unmark(raw_node);
-        while(marked) {
-          snip = atomic_compare_exchange_weak_explicit(&pred->next[level], &curr, succ, memory_order_release, memory_order_consume);
-          if(!snip) {
-            goto retry;
-          }
-          // Curr is reloaded from CAS.
-          raw_node = atomic_load_explicit(&curr->next[level], memory_order_consume);
-          marked = node_is_marked(raw_node);
-          succ = node_unmark(raw_node);
+        // Scan to the right so long as we find deleted nodes.
+        node_ptr right_next = atomic_load_explicit(&right->next[level], memory_order_consume);
+        while(node_is_marked(right_next)) {
+          right = node_unmark(right_next);
+          right_next = atomic_load_explicit(&right->next[level], memory_order_consume);
         }
-        if(curr->key < key) {
-          pred = curr;
-          curr = succ;
+        // Has the right not gone far enough?        
+        if(right->key < key) {
+          left = right;
+          left_next = right_next;
+          right = right_next;
         } else {
+          // Right node is greater than our key, he's our succ, break.
           break;
         }
       }
-      preds[level] = pred;
-      succs[level] = curr;
+      // Ensure the left node points to the right node, they must be adjacent.
+      if(left_next != right) {
+        bool success = atomic_compare_exchange_weak_explicit(&left->next[level], &left_next, right,
+          memory_order_release, memory_order_relaxed);
+        if(!success) { goto retry; }
+      }
+      preds[level] = left;
+      succs[level] = right;
     }
-    return curr->key == key;
+    return succs[BOTTOM]->key == key;
   }
 }
 
@@ -148,6 +174,10 @@ int c_sl_pq_add(uint64_t *seed, c_sl_pq_t * pqueue, int64_t key) {
   node_ptr node = NULL;
   while(true) {
     if(find(pqueue, key, preds, succs)) {
+      if(succs[BOTTOM]->deleted) {
+        mark_pointers(succs[BOTTOM]);
+        continue;
+      }
       forkscan_free((void*)node);
       return false;
     }
@@ -249,21 +279,20 @@ int c_sl_pq_remove(c_sl_pq_t * pqueue, int64_t key) {
 /** Remove the minimum element in the Shavit Lotan priority queue.
  */
 int c_sl_pq_leaky_pop_min(c_sl_pq_t * pqueue) {
-  while(true) {
-    node_ptr curr = node_unmark(atomic_load_explicit(&pqueue->head.next[0], memory_order_consume));
-    if(curr == &pqueue->tail) {
-      return false;
+  node_ptr left_next = node_unmark(atomic_load_explicit(&pqueue->head.next[BOTTOM], memory_order_consume));
+  if(left_next == &pqueue->tail) { return false; }
+  node_ptr curr = left_next;
+  for(; curr != &pqueue->tail; curr = node_unmark(atomic_load_explicit(&curr->next[BOTTOM], memory_order_consume))) {
+    if(atomic_load_explicit(&curr->deleted, memory_order_relaxed)) {
+      mark_pointers(curr);
+      continue;
     }
-    for(; curr != &pqueue->tail; curr = node_unmark(atomic_load_explicit(&curr->next[0], memory_order_consume))) {
-      if(curr->deleted) {
-        continue;
-      }
-      if(!atomic_exchange_explicit(&curr->deleted, true, memory_order_relaxed)){
-        bool res = c_sl_pq_remove_leaky(pqueue, curr->key);
-        return true;
-      }
+    if(!atomic_exchange_explicit(&curr->deleted, true, memory_order_relaxed)){
+      mark_pointers(curr);
+      return true;
     }
   }
+  return false;
 }
 
 /** Remove the minimum element in the Shavit Lotan priority queue.

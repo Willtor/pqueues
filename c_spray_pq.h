@@ -8,9 +8,6 @@
 
 #include <stdint.h>
 
-#define N 20
-#define BOTTOM 0
-
 typedef struct c_spray_pq_t c_spray_pq_t;
 
 c_spray_pq_t *c_spray_pq_create(int64_t threads);

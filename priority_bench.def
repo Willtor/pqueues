@@ -235,9 +235,9 @@ begin
             xcase "fhsl_tx": config.benchmark = FHSL_TX;
             xcase "fhsl_b": config.benchmark = FHSL_B;
             xcase "spray": config.benchmark = SPRAY;
+            xcase "c_spray_tx": config.benchmark = C_SPRAY_TX;
             xcase "c_spray": config.benchmark = C_SPRAY;
             xcase "c_spray_clean": config.benchmark = C_SPRAY_CLEAN;
-            xcase "c_spray_tx": config.benchmark = C_SPRAY_TX;
             xcase "spray_tx": config.benchmark = SPRAY_TX;
             xcase "sl_pq": config.benchmark = SL_PQ;
             xcase "c_sl_pq": config.benchmark = C_SL_PQ;
@@ -836,7 +836,7 @@ end
 export
 def main (argc i32, argv **char) -> i32
 begin
-    
+
     var config = read_args(argc, argv);
     var seed = cast(type u64, time(nil));
     var state = STATE_WAIT;

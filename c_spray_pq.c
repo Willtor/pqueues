@@ -14,6 +14,9 @@
 #include <pthread.h>
 #include <math.h>
 
+#define N 20
+#define BOTTOM 0
+
 enum STATE {PADDING, ACTIVE, DELETED};
 
 typedef enum STATE state_t;
@@ -171,6 +174,8 @@ static void mark_pointers(node_ptr node) {
   for(int64_t level = unmarked_node->toplevel; level >= BOTTOM; --level) {
     while(true) {
       node_ptr succ = atomic_load_explicit(&unmarked_node->next[level], memory_order_relaxed);
+      // Still being inserted, ignore this connection.
+      if(succ == NULL) { break; }
       bool marked = node_is_marked(succ);
       if(marked) { break; }
       node_ptr temp = succ;
@@ -201,7 +206,6 @@ retry:
           right = node_unmark(right_next);
           right_next = atomic_load_explicit(&right->next[level], memory_order_consume);
         }
-
         // Has the right not gone far enough?        
         if(right->key < key) {
           left = right;
@@ -231,11 +235,13 @@ int c_spray_pq_add(uint64_t *seed, c_spray_pq_t *pqueue, int64_t key) {
   node_ptr preds[N], succs[N];
   int32_t toplevel = random_level(seed, N);
   node_ptr node = NULL;
+  // int x = 0;
   while(true) {
     if(find(pqueue, key, preds, succs)) {
       node_ptr found_node = succs[BOTTOM];
       state_t found_state = atomic_load_explicit(&found_node->state, memory_order_relaxed);
       if(found_state == DELETED) {
+        // printf("lol %d\n", x++);
         mark_pointers(found_node);
         continue;
       }
@@ -358,165 +364,54 @@ static node_ptr spray(uint64_t * seed, c_spray_pq_t * pqueue) {
 int c_spray_pq_leaky_pop_min(uint64_t *seed, c_spray_pq_t *pqueue) {
 
   bool cleaner = ((fast_rand(seed) % (pqueue->config.thread_count)) == 0);
-  retry:
+retry:
   if(cleaner) {
-    // bool locked = atomic_load_explicit(&pqueue->cleaner_lock, memory_order_acquire);
-    // if(locked){ cleaner = false; goto retry; }
-    // if(atomic_exchange_explicit(&pqueue->cleaner_lock, true, memory_order_acquire) != false) { cleaner = false; goto retry; }
-    if(pthread_spin_trylock(&pqueue->lock) != 0) {
-      cleaner = false;
-      goto retry;
-    }
-    // Here. We. Go.
-    node_ptr lefts[N], left_nexts[N];
-    bool needs_swing[N];
-    for(int64_t i = N - 1; i >= BOTTOM; i--) {
-      lefts[i] = &pqueue->head;
-      left_nexts[i] = atomic_load_explicit(&pqueue->head.next[i], memory_order_consume);
-      needs_swing[i] = false;
-    }
+    // bool locked = atomic_load_explicit(&pqueue->cleaner_lock, memory_order_relaxed);
+    // if(locked) { cleaner = false; goto retry; }
+    // if(atomic_exchange_explicit(&pqueue->cleaner_lock, true, memory_order_acquire) == true) { cleaner = false; goto retry; }
 
-    // printf("BEFORE\n");
-    // c_spray_pq_print(pqueue);
-
-    bool claimed_node = false, in_prefix = false;
-    while(true) {
-      int64_t prefix_height = 0, valid_height = -1;
-      node_ptr right = node_unmark(left_nexts[BOTTOM]);
-      if(right == NULL) {
-        // atomic_store_explicit(&pqueue->cleaner_lock, false, memory_order_release);
-        pthread_spin_unlock(&pqueue->lock);
-        return false; 
-      }
-      in_prefix = false;
-      // TODO: Unmark?
-      node_ptr right_next = atomic_load_explicit(&right->next[BOTTOM], memory_order_consume);
-      // Node scan...
-      while(true) {
-        node_ptr unmarked_right = node_unmark(right);
-        if(unmarked_right == &pqueue->tail) {
-          bool done = true;
-          for(int64_t i = 0; i < N; i++) {
-            if(needs_swing[i]) { done = false;}
-          }
-          // We don't need to swing any pointers and we've seen the tail.
-          if(done) {
-            // atomic_store_explicit(&pqueue->cleaner_lock, false, memory_order_release);
-            pthread_spin_unlock(&pqueue->lock);
-            return false;
-          }
-          valid_height = unmarked_right->toplevel;
-          break; 
-        }
-        state_t state = atomic_load_explicit(&unmarked_right->state, memory_order_relaxed);
-        if(state == ACTIVE) {
-          if(!claimed_node) {
-            // Treat as another node to be discarded.
-            claimed_node = (atomic_exchange_explicit(&unmarked_right->state, DELETED, memory_order_relaxed) == ACTIVE);
-            mark_pointers(unmarked_right);
-          } else {
-            // If we're in a prefix save the height of the found node
-            // so that we can swing it.
-            valid_height = unmarked_right->toplevel;
-            if(!in_prefix) {
-              // We're not in a prefix and we've found the most rightward
-              // valid node. Save it's address and the values of it's nexts.
-              // printf("Not in prefix, found a valid node.\n");
-              for(int64_t i = unmarked_right->toplevel; i >= BOTTOM; i--) {
-                if(!needs_swing[i]) {
-                  lefts[i] = unmarked_right;
-                  left_nexts[i] = atomic_load_explicit(&unmarked_right->next[i], memory_order_consume);
-                }
-              }
-            }
-            in_prefix = false;
-            break;
-          }
-        } else {
+    node_ptr left = &pqueue->head;
+    node_ptr left_next = atomic_load_explicit(&pqueue->head.next[BOTTOM], memory_order_relaxed);
+    assert(!node_is_marked(left_next));
+    node_ptr right = left_next;
+    bool claimed_node = false;
+    for(; right != &pqueue->tail; right = node_unmark(atomic_load_explicit(&right->next[BOTTOM], memory_order_relaxed))) {
+      state_t state = right->state;
+      if(state == DELETED) { mark_pointers(right); continue; }
+      if(state == ACTIVE) {
+        if(!claimed_node) {
+          claimed_node = (atomic_exchange_explicit(&right->state, DELETED, memory_order_relaxed) == ACTIVE);
           mark_pointers(right);
+          claimed_node = true;
+          continue;
         }
-        // In deleted prefix.
-        in_prefix = true;
-        // mark_pointers(right);
-        // The pointers at these levels need to move around this node.
-        for(int64_t i = 0; i <= unmarked_right->toplevel; i++) {
-          needs_swing[i] = true; 
+        if(atomic_load_explicit(&pqueue->head.next[BOTTOM], memory_order_relaxed) == left_next) {
+          atomic_compare_exchange_weak_explicit(&left->next[BOTTOM], &left_next, right, memory_order_release, memory_order_relaxed);
         }
-       
-        right = node_unmark(right_next);
-        right_next = atomic_load_explicit(&right->next[BOTTOM], memory_order_consume);
-      }
-      // Did we skip over anyone?
-      // Or, did we find someone or interest?
-      if(left_nexts[BOTTOM] != right_next || valid_height >= 0) {
-        // printf("SWINGING POINTER BOIS AROUND\n");
-        // c_spray_pq_print(pqueue);
-        // printf("LEFTS\n");
-        // for(int64_t i = 0; i < N; i++) {
-        //   print_node(lefts[i]);
-        // }
-        // printf("LEFT NEXT\n");
-        // for(int64_t i = 0; i < N; i++) {
-        //   print_node(left_nexts[i]);
-        // }
-        // printf("REPLACEMENT\n");
-        // print_node(right);
-        // printf("Valid height %ld\n", valid_height);
-        for(int64_t level = valid_height; level >= BOTTOM; level--) {
-          // assert(claimed_node);
-          if(needs_swing[level]) {
-            // if(atomic_load_explicit(&node_unmark(left_nexts[level])->state, memory_order_relaxed) != DELETED) {
-            //   printf("%ld, %d, %ld\n", atomic_load_explicit(&node_unmark(left_nexts[level])->state, memory_order_relaxed), left_nexts[BOTTOM] != right_next, valid_height);
-            // }
-            // assert(atomic_load_explicit(&node_unmark(left_nexts[level])->state, memory_order_relaxed) == DELETED);
-            bool success = atomic_compare_exchange_weak_explicit(&lefts[level]->next[level], &left_nexts[level], right,
-              memory_order_release, memory_order_relaxed);
-            if(success) {
-              lefts[level] = right;
-              left_nexts[level] =  atomic_load_explicit(&right->next[level], memory_order_consume);
-              needs_swing[level] = false;
-            } else if(claimed_node) {
-              // printf("AFTER failed CAS at level%ld\n", level);
-              // c_spray_pq_print(pqueue);
-              // assert(false);
-              // atomic_store_explicit(&pqueue->cleaner_lock, false, memory_order_release);
-              pthread_spin_unlock(&pqueue->lock);
-              return true;
-            } else {
-              // Someone interrupted our swinging in this deleted prefix 
-              // AND we don't have a claimed node. Try again.
-              // atomic_store_explicit(&pqueue->cleaner_lock, false, memory_order_release);
-              pthread_spin_unlock(&pqueue->lock);
-              cleaner = false;
-              goto retry;
-            }
-          }
-        }
-      } else { /*printf("NO CHANGES\n");*/ }
-      valid_height = -1;
-      bool done = true;
-      for(int64_t i = 0; i < N; i++) {
-        if(needs_swing[i]) { done = false;}
-      }
-      if(!done) { continue; }
-
-      if(claimed_node) {
+        node_ptr preds[N], succs[N];
+        find(pqueue, right->key, preds, succs);
         // atomic_store_explicit(&pqueue->cleaner_lock, false, memory_order_release);
-        pthread_spin_unlock(&pqueue->lock);
         return true;
       }
     }
+    if(atomic_load_explicit(&pqueue->head.next[BOTTOM], memory_order_relaxed) == left_next) {
+      atomic_compare_exchange_weak_explicit(&left->next[BOTTOM], &left_next, right, memory_order_release, memory_order_relaxed);
+    }
+    // atomic_store_explicit(&pqueue->cleaner_lock, false, memory_order_release);
+    if(claimed_node) {
+      node_ptr preds[N], succs[N];
+      find(pqueue, right->key, preds, succs);
+    }
+    return claimed_node;
   } else {
     node_ptr node = spray(seed, pqueue);
     // If we're not passed the head yet, start just after there.
     if(atomic_load_explicit(&node->state, memory_order_relaxed) == PADDING) {
       node = atomic_load_explicit(&pqueue->head.next[BOTTOM], memory_order_relaxed);
     }
-    for(uint64_t i = 0; node != &pqueue->tail; node = node_unmark(atomic_load_explicit(&node->next[BOTTOM], memory_order_relaxed)), i++) {
+    for(; node != &pqueue->tail; node = node_unmark(atomic_load_explicit(&node->next[BOTTOM], memory_order_relaxed))) {
       state_t state = atomic_load_explicit(&node->state, memory_order_relaxed);
-      if(state == PADDING || state == DELETED) {
-        continue;
-      }
+      if(state == DELETED) { continue; }
       if(state == ACTIVE && 
         (atomic_exchange_explicit(&node->state, DELETED, memory_order_relaxed) == ACTIVE)) {
         mark_pointers(node);
