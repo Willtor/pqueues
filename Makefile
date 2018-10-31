@@ -30,7 +30,8 @@ DEF_PQUEUES = \
 	spray_pq.def \
 	spray_tx_pq.def \
 	lj_pq.def \
-	serial_btree.def
+	serial_btree.def \
+	mq_locked_btree.def
 
 C_PQUEUES = \
 	c_sl_pq.c \

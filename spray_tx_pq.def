@@ -40,9 +40,9 @@ begin
   fi
 
   var spray_tx_config spray_tx_pq_config_t = {
-    cast(type i64, threads), cast(type i64, log2(threads) + 1),
-    cast(type i64, log2(threads) + 1), 1I64, 
-    threads * cast(type i64, log2(log_arg))
+    cast i64 (threads), cast i64 (log2(threads) + 1),
+    cast i64 (log2(threads) + 1), 1I64, 
+    threads * cast i64 (log2(log_arg))
   };
   return spray_tx_config;
 end
@@ -288,10 +288,10 @@ def ref_and_markbit (ptr *node_t) -> { *node_t, bool } =
     { unmark(ptr), is_marked(ptr) };
 
 def mark (ptr *node_t) -> *node_t =
-    cast(type *node_t, 0x1I64 | cast(type i64, ptr));
+    cast *node_t (0x1I64 | cast i64 (ptr));
 
 def unmark (ptr *node_t) -> *node_t =
-    cast(type *node_t, 0xFFFFFFFFFFFFFFFEI64 & cast(type i64, ptr));
+    cast *node_t (0xFFFFFFFFFFFFFFFEI64 & cast i64 (ptr));
 
 def is_marked (ptr *node_t) -> bool =
-    cast(type bool, 0x1I64 & cast(type i64, ptr));
+    cast bool (0x1I64 & cast i64 (ptr));

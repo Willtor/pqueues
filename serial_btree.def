@@ -72,7 +72,7 @@ end
 export
 def serial_btree_create () -> *serial_btree
 begin
-    var root = cast(type *node, make_leaf());
+    var root = cast *node (make_leaf());
     var btree = new serial_btree { root : root };
     return btree;
 end
@@ -335,6 +335,12 @@ export
 def serial_btree_peek_min (btree *serial_btree) -> i64
 begin
     return peek_min(btree.root);
+end
+
+export
+def serial_btree_is_empty (btree *serial_btree) -> bool
+begin
+    return btree.root.n == 0;
 end
 
 def peek_min (node *node) -> i64
