@@ -21,6 +21,8 @@ import "c_spray_pq_tx.h";
 import "lj_pq.defi";
 import "c_lj_pq.h";
 import "mq_locked_btree.defi";
+import "c_hunt_heap.h";
+import "c_mounds.h";
 
 typedef benchmark_t = enum
     | FHSL_LF
@@ -36,6 +38,8 @@ typedef benchmark_t = enum
     | LJ_PQ
     | C_LJ_PQ
     | MQ_LOCKED_BTREE
+    | C_HUNT
+    | C_MOUNDS
     ;
 
 typedef memory_policy_t = enum
@@ -129,6 +133,8 @@ begin
     xcase LJ_PQ: return "lj_pq";
     xcase C_LJ_PQ: return "c_lj_pq";
     xcase MQ_LOCKED_BTREE: return "mq_locked_btree";
+    xcase C_HUNT: return "c_hunt";
+    xcase C_MOUNDS: return "c_mounds";
     xcase _: return "unknown benchmark";
     esac
 end
@@ -162,6 +168,8 @@ begin
     printf("     * lj_pq: Fixed-height skip list based priority queue; lock-free with Linden Jonsson delete min.\n");
     printf("     * c_lj_pq: Fixed-height skip list based priority pqueue written in C; lock-free with Linden Jonsson delete min.\n");
     printf("     * mq_locked_btree: Multiqueue with a locked btree base.\n");
+    printf("     * c_hunt: Hunt et al heap based priority queue. Written in C.\n");
+    printf("     * c_mounds: Lock-based mounds priority queue. Written in C.\n");
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
@@ -243,6 +251,8 @@ begin
             xcase "lj_pq": config.benchmark = LJ_PQ;
             xcase "c_lj_pq": config.benchmark = C_LJ_PQ;
             xcase "mq_locked_btree": config.benchmark = MQ_LOCKED_BTREE;
+            xcase "c_hunt": config.benchmark = C_HUNT;
+            xcase "c_mounds": config.benchmark = C_MOUNDS;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
                 exit(1);
@@ -315,6 +325,9 @@ begin
     ocase { C_LJ_PQ, POLICY_LEAKY }:
     ocase { C_LJ_PQ, POLICY_RETIRE }:
     ocase { MQ_LOCKED_BTREE, _ }:
+    ocase { C_HUNT, _ }:
+    ocase { C_MOUNDS, POLICY_LEAKY }:
+    ocase { C_MOUNDS, POLICY_RETIRE }:
     xcase _:
         printf("Unsupported configuration:\n");
         printf("  benchmark: %s\n  policy: %s\n",
@@ -696,6 +709,49 @@ begin
                 fi
             fi
 
+/***************************************************************************/
+/*                  Hunt et al heap based priority queue.                  */
+/***************************************************************************/
+
+        xcase C_HUNT:
+            if insert_action then
+                ++stats.insert_attempts;
+                c_hunt_pq_add(pqueue, val);
+                ++stats.insert_successes;
+                insert_action = false;
+            else
+                ++stats.remove_attempts;
+                if c_hunt_pq_leaky_pop_min(pqueue) then
+                    ++stats.remove_successes;
+                    insert_action = true;
+                fi
+            fi
+
+/***************************************************************************/
+/*                          Mounds priority queue.                         */
+/***************************************************************************/
+
+        xcase C_MOUNDS:
+            if insert_action then
+                ++stats.insert_attempts;
+                c_mound_pq_add(&seed, pqueue, val);
+                ++stats.insert_successes;
+                insert_action = false;
+            else
+                stats.remove_attempts++;
+                if policy == POLICY_LEAKY then
+                    if c_mound_pq_leaky_pop_min(pqueue) == 1 then
+                        stats.remove_successes++;
+                        insert_action = true;
+                    fi
+                else 
+                    if c_mound_pq_pop_min(pqueue) == 1 then
+                        stats.remove_successes++;
+                        insert_action = true;
+                    fi
+                fi
+            fi
+
         xcase _:
             printf("error: unknown benchmark configuration.\n");
             exit(1);
@@ -750,6 +806,10 @@ begin
         xcase MQ_LOCKED_BTREE:
             mq_locked_btree_add(&seed, config.pqueue, val);
             res = true;
+        xcase C_HUNT:
+            res = c_hunt_pq_add(config.pqueue, val);
+        xcase C_MOUNDS:
+            res = c_mound_pq_add(&seed, config.pqueue, val);
         xcase _:
             printf("error: unable to initialize unknown pqueue.\n");
             exit(1);
@@ -790,6 +850,10 @@ begin
         config.pqueue = c_lj_pq_create(config.thread_count);
     xcase MQ_LOCKED_BTREE:
         config.pqueue = mq_locked_btree_create(/*FIXME*/4);
+    xcase C_HUNT:
+        config.pqueue = c_hunt_pq_create(config.upper_bound);
+    xcase C_MOUNDS:
+        config.pqueue = c_mound_pq_create(config.upper_bound);
     xcase _:
         printf("error: unable to initialize unknown pqueue.\n");
         exit(1);

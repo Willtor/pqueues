@@ -37,7 +37,9 @@ C_PQUEUES = \
 	c_sl_pq.c \
 	c_spray_pq.c \
 	c_spray_pq_tx.c \
-	c_lj_pq.c
+	c_lj_pq.c \
+	c_hunt_heap.c \
+	c_mounds.c
 
 
 DEFIFILES = $(DEF_SETS:.def=.defi) $(DEF_PQUEUES:.def=.defi)

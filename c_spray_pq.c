@@ -141,6 +141,7 @@ c_spray_pq_t* c_spray_pq_create(int64_t threads) {
     }
     spray_pq->padding_head = node;
   }
+  print_config(&spray_pq->config);
   return spray_pq;
 }
 

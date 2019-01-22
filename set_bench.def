@@ -388,8 +388,8 @@ end
 
 def thread (arg *void) -> *void
 begin
-    var seed = cast u64 (time(nil));
     var ptd = cast volatile *per_thread_data_t (arg);
+    var seed = cast u64 (time(nil)) + ptd.id;
     var stats stats_t = { 0, 0, 0, 0, 0, 0 };
     var config *config_t = ptd.config;
     var bench = config.benchmark;
