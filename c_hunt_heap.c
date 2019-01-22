@@ -46,12 +46,12 @@ void bit_reversed_counter_init(bit_reversed_counter_t *brc) {
 
 uintmax_t bit_reversed_counter_increment(bit_reversed_counter_t *brc) {
   brc->count++;
-  int32_t bit = brc->high_bit;
+  int32_t bit = brc->high_bit - 1;
   for(; bit >= 0; bit--) {
     uintmax_t mask = UINTMAX_C(1) << bit;
-    uintmax_t is_set = brc->reversed & mask;
+    uintmax_t was_set = brc->reversed & mask;
     brc->reversed ^= mask;
-    if(is_set != 0) {
+    if(was_set != 0) {
       break;
     }
   }
@@ -64,12 +64,12 @@ uintmax_t bit_reversed_counter_increment(bit_reversed_counter_t *brc) {
 
 uintmax_t bit_reversed_counter_decrement(bit_reversed_counter_t *brc) {
   brc->count--;
-  int32_t bit = brc->high_bit;
+  int32_t bit = brc->high_bit - 1;
   for(; bit >= 0; bit--) {
     uintmax_t mask = UINTMAX_C(1) << bit;
-    uintmax_t is_set = brc->reversed & mask;
+    uintmax_t was_set = brc->reversed & mask;
     brc->reversed ^= mask;
-    if(is_set == 0) {
+    if(was_set == 0) {
       break;
     }
   }

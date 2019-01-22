@@ -20,7 +20,6 @@
 typedef struct list_node_t list_node_t;
 typedef struct mound_node_t mound_node_t;
 typedef struct bit_reversed_counter_t bit_reversed_counter_t;
-typedef struct my_lock_t my_lock_t;
 
 struct list_node_t {
   int64_t priority;
