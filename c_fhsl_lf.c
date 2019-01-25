@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <forkscan.h>
 #include <stdio.h>
-
+#include "utils.h"
 
 #define N 20
 #define BOTTOM 0
@@ -89,26 +89,6 @@ int c_fhsl_lf_contains(c_fhsl_lf_t *set, int64_t key) {
     }
   }
   return false;
-}
-
-static uint64_t fast_rand (uint64_t *seed){
-  uint64_t val = *seed;
-  if(val == 0) {
-    val = 1;
-  }
-  val ^= val << 6;
-  val ^= val >> 21;
-  val ^= val << 7;
-  *seed = val;
-  return val;
-}
-
-static int32_t random_level (uint64_t *seed, int32_t max) {
-  int32_t level = 1;
-  while(fast_rand(seed) % 2 == 0 && level < max) {
-    level++;
-  }
-  return level - 1;
 }
 
 static bool find(c_fhsl_lf_t *set, int64_t key, 

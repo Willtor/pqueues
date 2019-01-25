@@ -11,6 +11,8 @@ import "fhsl_lf.defi";
 import "fhsl_b.defi";
 import "fhsl_tx.defi";
 import "c_fhsl_lf.h";
+import "c_fhsl_fc.h";
+
 // Pqueue data structures:
 import "sl_pq.defi";
 import "c_sl_pq.h";
@@ -40,6 +42,7 @@ typedef benchmark_t = enum
     | MQ_LOCKED_BTREE
     | C_HUNT
     | C_MOUNDS
+    | C_FHSL_FC
     ;
 
 typedef memory_policy_t = enum
@@ -171,6 +174,7 @@ begin
     printf("     * mq_locked_btree: Multiqueue with a locked btree base.\n");
     printf("     * c_hunt: Hunt et al heap based priority queue. Written in C.\n");
     printf("     * c_mounds: Lock-based mounds priority queue. Written in C.\n");
+    printf("     * c_fhsl_fc: Use the flat combining skiplist written in C.\n");
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
@@ -270,6 +274,7 @@ begin
             xcase "mq_locked_btree": config.benchmark = MQ_LOCKED_BTREE;
             xcase "c_hunt": config.benchmark = C_HUNT;
             xcase "c_mounds": config.benchmark = C_MOUNDS;
+            xcase "c_fhsl_fc": config.benchmark = C_FHSL_FC;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
                 exit(1);
@@ -353,6 +358,7 @@ begin
     ocase { C_HUNT, _ }:
     ocase { C_MOUNDS, POLICY_LEAKY }:
     ocase { C_MOUNDS, POLICY_RETIRE }:
+    ocase { C_FHSL_FC, _ }:
     xcase _:
         printf("Unsupported configuration:\n");
         printf("  benchmark: %s\n  policy: %s\n",
@@ -776,6 +782,25 @@ begin
                     fi
                 fi
             fi
+/***************************************************************************/
+/*                    flat combining skiplist written in C                 */
+/***************************************************************************/
+        
+        xcase C_FHSL_FC:
+            if insert_action then
+                stats.insert_attempts++;
+                if 0 != c_fhsl_fc_add(pqueue, val, ptd.id) then
+                    stats.insert_successes++;
+                    insert_action = false;
+                fi
+            else
+                stats.remove_attempts++;
+                if 0 != c_fhsl_fc_pop_min(pqueue, ptd.id) then
+                    stats.remove_successes++;
+                    insert_action = true;
+                fi
+            fi
+
 
         xcase _:
             printf("error: unknown benchmark configuration.\n");
@@ -835,6 +860,8 @@ begin
             res = c_hunt_pq_add(config.pqueue, val);
         xcase C_MOUNDS:
             res = c_mound_pq_add(&seed, config.pqueue, val);
+        xcase C_FHSL_FC:
+            res = c_fhsl_fc_add(config.pqueue, val, 0) == 1;
         xcase _:
             printf("error: unable to initialize unknown pqueue.\n");
             exit(1);
@@ -882,6 +909,8 @@ begin
         config.pqueue = c_hunt_pq_create(config.upper_bound);
     xcase C_MOUNDS:
         config.pqueue = c_mound_pq_create(config.upper_bound);
+    xcase C_FHSL_FC:
+        config.pqueue = c_fhsl_fc_create(config.thread_count);
     xcase _:
         printf("error: unable to initialize unknown pqueue.\n");
         exit(1);

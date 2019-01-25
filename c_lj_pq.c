@@ -3,6 +3,7 @@
  */
 
 #include "c_lj_pq.h"
+#include "utils.h"
 
 #include <stdbool.h>
 #include <stdatomic.h>
@@ -75,26 +76,6 @@ c_lj_pq_t * c_lj_pq_create(uint32_t boundoffset) {
     atomic_store_explicit(&lj_pqueue->tail.next[i], NULL, memory_order_relaxed);
   }
   return lj_pqueue;
-}
-
-static uint64_t fast_rand (uint64_t *seed){
-  uint64_t val = *seed;
-  if(val == 0) {
-    val = 1;
-  }
-  val ^= val << 6;
-  val ^= val >> 21;
-  val ^= val << 7;
-  *seed = val;
-  return val;
-}
-
-static int32_t random_level (uint64_t *seed, int32_t max) {
-  int32_t level = 1;
-  while(fast_rand(seed) % 2 == 0 && level < max) {
-    level++;
-  }
-  return level - 1;
 }
 
 

@@ -21,7 +21,9 @@ DEF_SETS = \
 C_SETS = \
 	c_fhsl_lf.c \
 	c_fhsl_tx.c \
-	c_bt_lf.c
+	c_bt_lf.c \
+	c_fhsl_fc.c \
+	c_fhsl.c
 
 DEF_PQUEUES = \
 	fhsl_lf.def \
@@ -39,7 +41,9 @@ C_PQUEUES = \
 	c_spray_pq_tx.c \
 	c_lj_pq.c \
 	c_hunt_heap.c \
-	c_mounds.c
+	c_mounds.c \
+	c_fhsl_fc.c \
+	c_fhsl.c
 
 
 DEFIFILES = $(DEF_SETS:.def=.defi) $(DEF_PQUEUES:.def=.defi)
