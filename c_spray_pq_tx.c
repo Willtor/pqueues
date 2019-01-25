@@ -4,6 +4,7 @@
 
 #include "c_spray_pq_tx.h"
 #include "elided_lock.h"
+#include "utils.h"
 
 #include <assert.h>
 #include <stdbool.h>
@@ -505,26 +506,6 @@ c_spray_pq_tx_t * c_spray_pq_tx_create_test4(int64_t threads) {
   node7->next[3] = &spray_pq_tx->tail;  
 
   return spray_pq_tx;
-}
-
-static uint64_t fast_rand (uint64_t *seed){
-  uint64_t val = *seed;
-  if(val == 0) {
-    val = 1;
-  }
-  val ^= val << 6;
-  val ^= val >> 21;
-  val ^= val << 7;
-  *seed = val;
-  return val;
-}
-
-static int32_t random_level (uint64_t *seed, int32_t max) {
-  int32_t level = 1;
-  while(fast_rand(seed) % 2 == 0 && level < max) {
-    level++;
-  }
-  return level - 1;
 }
 
 static bool find(c_spray_pq_tx_t *pqueue, int64_t key, 

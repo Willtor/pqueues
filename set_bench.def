@@ -16,6 +16,7 @@ import "stacktrack/skip-list.h";
 import "bt_lf.defi";
 import "bt_tx.defi";
 import "c_bt_lf.h";
+import "c_fhsl_fc.h";
 
 typedef benchmark_t = enum
     | FHSL_LF
@@ -27,6 +28,7 @@ typedef benchmark_t = enum
     | BT_LF
     | BT_TX
     | C_BT_LF
+    | C_FHSL_FC
     ;
 
 typedef memory_policy_t = enum
@@ -120,6 +122,7 @@ begin
     xcase C_BT_LF: return "bt_lf";
     xcase BT_LF: return "bt_lf";
     xcase BT_TX: return "bt_tx";
+    xcase C_FHSL_FC: return "c_fhsl_fc";
     xcase _: return "unknown benchmark";
     esac
 end
@@ -150,6 +153,7 @@ begin
     printf("     * bt_lf: Use the lock-free binary tree written in DEF.\n");
     printf("     * bt_tx: Use the transactional binary tree written in DEF.\n");
     printf("     * c_bt_lf: Use the lock-free binary tree written in C.\n");
+    printf("     * c_fhsl_fc: Use the flat combining skiplist written in C.\n");
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
@@ -230,6 +234,7 @@ begin
             xcase "bt_lf": config.benchmark = BT_LF;
             xcase "c_bt_lf": config.benchmark = C_BT_LF;
             xcase "bt_tx": config.benchmark = BT_TX;
+            xcase "c_fhsl_fc": config.benchmark = C_FHSL_FC;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
                 exit(1);
@@ -309,6 +314,7 @@ begin
     ocase { BT_LF, POLICY_RETIRE}:
     ocase { BT_TX, POLICY_LEAKY }:
     ocase { BT_TX, POLICY_RETIRE }:
+    ocase { C_FHSL_FC, _ }:
     xcase _:
         printf("Unsupported configuration:\n");
         printf("  benchmark: %s\n  policy: %s\n",
@@ -690,6 +696,27 @@ begin
                     exit(1);
                 esac
             fi
+/***************************************************************************/
+/*                    flat combining skiplist written in C                 */
+/***************************************************************************/
+        
+        xcase C_FHSL_FC:
+            if action < read_action then
+                stats.read_attempts++;
+                if 0 != c_fhsl_fc_contains(set, val, ptd.id) then
+                    stats.read_successes++;
+                fi
+            elif action < add_action then
+                stats.insert_attempts++;
+                if 0 != c_fhsl_fc_add(set, val, ptd.id) then
+                    stats.insert_successes++;
+                fi
+            else
+                stats.remove_attempts++;
+                if 0 != c_fhsl_fc_remove(set, val, ptd.id) then
+                    stats.remove_successes++;
+                fi
+            fi
 
 /***************************************************************************/
 /*                transactional binary tree written in DEF                 */
@@ -797,6 +824,8 @@ begin
             res = bt_tx_add(config.set, val);
         xcase C_BT_LF:
             res = c_bt_lf_add(config.set, val) == 1;
+        xcase C_FHSL_FC:
+            res = c_fhsl_fc_add(config.set, val, 0) == 1;
         xcase _:
             printf("error: unable to initialize unknown set.\n");
         esac
@@ -842,6 +871,8 @@ begin
         config.set = bt_tx_create();
     xcase C_BT_LF:
         config.set = c_bt_lf_create();
+    xcase C_FHSL_FC:
+        config.set = c_fhsl_fc_create(config.thread_count);
     xcase _:
         printf("error: unable to initialize unknown set.\n");
         exit(1);
@@ -852,6 +883,7 @@ begin
     if num_threads > 16 then
         num_threads = 16;
     fi
+    num_threads = 1;
     printf("Init threads %ld\n", num_threads);
     var thread_data *init_thread_data_t = new [num_threads]init_thread_data_t;
     var tids *pthread_t = new [num_threads]pthread_t;

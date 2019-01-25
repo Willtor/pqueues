@@ -5,6 +5,7 @@
  */
 
 #include "c_spray_pq.h"
+#include "utils.h"
 
 #include <stdbool.h>
 #include <stdatomic.h>
@@ -143,26 +144,6 @@ c_spray_pq_t* c_spray_pq_create(int64_t threads) {
   }
   print_config(&spray_pq->config);
   return spray_pq;
-}
-
-static uint64_t fast_rand (uint64_t *seed) {
-  uint64_t val = *seed;
-  if(val == 0) {
-    val = 1;
-  }
-  val ^= val << 6;
-  val ^= val >> 21;
-  val ^= val << 7;
-  *seed = val;
-  return val;
-}
-
-static int32_t random_level (uint64_t *seed, int32_t max) {
-  int32_t level = 1;
-  while(fast_rand(seed) % 2 == 0 && level < max) {
-    level++;
-  }
-  return level - 1;
 }
 
 static void mark_pointers(node_ptr node) {

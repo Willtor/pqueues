@@ -5,6 +5,7 @@
  */
 
 #include "c_mounds.h"
+#include "utils.h"
 
 #include <stdbool.h>
 #include <stdatomic.h>
@@ -80,19 +81,6 @@ c_mound_pq_t* c_mound_pq_create(size_t size) {
   atomic_store_explicit(&mound_pqueue->depth, log2(size) - 1, memory_order_relaxed);
   return mound_pqueue;
 }
-
-static uint64_t fast_rand (uint64_t *seed){
-  uint64_t val = *seed;
-  if(val == 0) {
-    val = 1;
-  }
-  val ^= val << 6;
-  val ^= val >> 21;
-  val ^= val << 7;
-  *seed = val;
-  return val;
-}
-
 
 static mound_node_t* lock(c_mound_pq_t *pqueue, size_t i) {
   mound_node_t *mound = &pqueue->tree[i];

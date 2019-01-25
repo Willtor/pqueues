@@ -21,7 +21,9 @@ DEF_SETS = \
 C_SETS = \
 	c_fhsl_lf.c \
 	c_fhsl_tx.c \
-	c_bt_lf.c
+	c_bt_lf.c \
+	c_fhsl_fc.c \
+	c_fhsl.c
 
 DEF_PQUEUES = \
 	fhsl_lf.def \
