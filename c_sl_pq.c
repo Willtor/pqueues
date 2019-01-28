@@ -289,7 +289,8 @@ int c_sl_pq_pop_min(c_sl_pq_t * pqueue) {
         continue;
       }
       if(!atomic_exchange_explicit(&curr->deleted, true, memory_order_relaxed)){
-        bool res = c_sl_pq_remove(pqueue, curr->key);
+        mark_pointers(curr);
+        forkscan_retire(curr);
         return true;
       }
     }
