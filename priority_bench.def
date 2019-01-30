@@ -66,7 +66,8 @@ typedef config_t =
         thread_count   i32,
         init_size      i64,
         upper_bound    i64,
-        pqueue          *void
+        pqueue         *void,
+        mq_c           f32        // Multiplier for the multiqueue.
     };
 
 typedef stats_t =
@@ -179,6 +180,7 @@ begin
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
     printf("  -i <n>: Initial pqueue size. (default = 256)\n");
     printf("  -r <n>: Range upper bound [0-n). (default = 512)\n");
+    printf("  -c <n>: Floating point multiplier for the multiqueue.  (default 4.0)\n");
     printf("  --csv: Generate a comma-separated value summary.\n");
     exit(127);
 end
@@ -211,10 +213,25 @@ begin
     return n;
 end
 
+/** Parse an f32 from txt in the range [low, high].  The err text is the
+ *  command line option and is used in case of failure.
+ */
+def read_f32 (low f32, high f32, txt *char, err *char) -> f32
+begin
+    var n = cast f32 (atof(txt));
+    if n < low || n > high then
+        fprintf(stderr,
+                "error: %s requires an argument between %.4f and %.4f\n",
+                err, cast f64 (low), cast f64 (high));
+        exit(1);
+    fi
+    return n;
+end
+
 def read_args (argc i32, argv **char) -> config_t
 begin
     var config config_t =
-        { FHSL_LF, POLICY_LEAKY, false, 1, 1, 256, 512, nil };
+        { FHSL_LF, POLICY_LEAKY, false, 1, 1, 256, 512, nil, 4.0f };
 
     for var i = 1; i < argc; ++i do
         switch argv[i] with
@@ -293,6 +310,14 @@ begin
             fi
             config.upper_bound =
                 read_i64(1, 0x7FFFFFFFFFFFFFFFI64, argv[i], "-r");
+        xcase "-c":
+            ++i;
+            if i >= argc then
+                fprintf(stderr, "error: -c requires an argument.\n");
+                exit(1);
+            fi
+            config.mq_c =
+                read_f32(0.1f, 100.0f, argv[i], "-c");
         xcase "--csv":
             config.csv = true;
         xcase _:
@@ -876,7 +901,10 @@ begin
     xcase C_LJ_PQ:
         config.pqueue = c_lj_pq_create(config.thread_count);
     xcase MQ_LOCKED_BTREE:
-        config.pqueue = mq_locked_btree_create(/*FIXME*/4);
+        // Compute the number of queues in the multiqueue.
+        var n f32 = config.thread_count * config.mq_c;
+        if n < 2.0f then n = 2.0f; fi
+        config.pqueue = mq_locked_btree_create(cast i32 (n));
     xcase C_HUNT:
         config.pqueue = c_hunt_pq_create(config.upper_bound);
     xcase C_MOUNDS:

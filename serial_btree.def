@@ -259,12 +259,18 @@ begin
         // CLRS [p502]: Case 3a.
         if i > 0 && node.children[i - 1].n >= /*t=*/2 then // Rotate right.
             var victim = node.children[i - 1];
-            for var j = child.n; j > 0; --j do
-                child.keys[j] = child.keys[j - 1];
-                child.children[j + 1] = child.children[j];
-            od
+            if child.is_leaf then
+                for var j = child.n; j > 0; --j do
+                    child.keys[j] = child.keys[j - 1];
+                od
+            else
+                for var j = child.n; j > 0; --j do
+                    child.keys[j] = child.keys[j - 1];
+                    child.children[j + 1] = child.children[j];
+                od
+                child.children[0] = victim.children[victim.n];
+            fi
             child.keys[0] = node.keys[i - 1];
-            child.children[0] = victim.children[victim.n];
             ++child.n;
             node.keys[i - 1] = victim.keys[victim.n - 1];
             --victim.n;
@@ -272,14 +278,22 @@ begin
              && node.children[i + 1].n >= /*t=*/2 then // Rotate left.
             var victim = node.children[i + 1];
             child.keys[child.n] = node.keys[i];
-            child.children[child.n + 1] = victim.children[0];
+            if !child.is_leaf then
+                child.children[child.n + 1] = victim.children[0];
+            fi
             ++child.n;
             node.keys[i] = victim.keys[0];
-            for var j = 0; j < victim.n - 1; ++j do
-                victim.keys[j] = victim.keys[j + 1];
-                victim.children[j] = victim.children[j + 1];
-            od
-            victim.children[victim.n - 1] = victim.children[victim.n];
+            if victim.is_leaf then
+                for var j = 0; j < victim.n - 1; ++j do
+                    victim.keys[j] = victim.keys[j + 1];
+                od
+            else
+                for var j = 0; j < victim.n - 1; ++j do
+                    victim.keys[j] = victim.keys[j + 1];
+                    victim.children[j] = victim.children[j + 1];
+                od
+                victim.children[victim.n - 1] = victim.children[victim.n];
+            fi
             --victim.n;
 
         // CLRS [p502]: Case 3b.
@@ -302,11 +316,17 @@ begin
     var z = node.children[i + 1];
 
     y.keys[/*t-1=*/1] = node.keys[i];
-    for var j = 0; j < z.n; ++j do
-        y.keys[j + /*t=*/2] = z.keys[j];
-        y.children[j + /*t=*/2] = z.children[j];
-    od
-    y.children[/*2t-1=*/3] = z.children[/*t-1*/1];
+    if y.is_leaf then
+        for var j = 0; j < z.n; ++j do
+            y.keys[j + /*t=*/2] = z.keys[j];
+        od
+    else
+        for var j = 0; j < z.n; ++j do
+            y.keys[j + /*t=*/2] = z.keys[j];
+            y.children[j + /*t=*/2] = z.children[j];
+        od
+        y.children[/*2t-1=*/3] = z.children[/*t-1*/1];
+    fi
     y.n = /*2t-1=*/3;
     ++i;
     while i < node.n do

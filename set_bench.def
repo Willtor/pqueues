@@ -82,6 +82,128 @@ typedef init_thread_data_t =
         id            i64
     };
 
+@[define [default-call fname]
+   [parse-expr @[emit-ident fname](set, val) ]]
+@[define [seed-call fname]
+   [parse-expr @[emit-ident fname](&seed, set, val) ]]
+@[define [stacktrack-call fname]
+   [parse-expr 0 == @[emit-ident fname](st_thread, set, val) ]]
+@[define [stacktrack-call-ptr fname]
+   [parse-expr nil == @[emit-ident fname](st_thread, set, val) ]]
+@[define [flatcombining-call fname]
+   [parse-expr @[emit-ident fname](set, val, ptd.id) ]]
+
+@[define benchmarks
+   `[["FHSL_LF" "POLICY_LEAKY"
+       [default-call "fhsl_lf_contains"]
+       [seed-call "fhsl_lf_add"]
+       [default-call "fhsl_lf_leaky_remove"]]
+     ["FHSL_LF" "POLICY_RETIRE"
+       [default-call "fhsl_lf_contains"]
+       [seed-call "fhsl_lf_add"]
+       [default-call "fhsl_lf_remove"]]
+     ["C_FHSL_LF" "POLICY_LEAKY"
+       [default-call "c_fhsl_lf_contains"]
+       [seed-call "c_fhsl_lf_add"]
+       [default-call "c_fhsl_lf_remove_leaky"]]
+     ["FHSL_B" "POLICY_LEAKY"
+       [default-call "fhsl_b_contains"]
+       [seed-call "fhsl_b_add"]
+       [default-call "fhsl_b_leaky_remove"]]
+     ["FHSL_B" "POLICY_RETIRE"
+       [default-call "fhsl_b_contains"]
+       [seed-call "fhsl_b_add"]
+       [default-call "fhsl_b_remove"]]
+     ["FHSL_TX" "POLICY_LEAKY"
+       [default-call "fhsl_tx_contains"]
+       [seed-call "fhsl_tx_add"]
+       [default-call "fhsl_tx_leaky_remove"]]
+     ["FHSL_TX" "POLICY_RETIRE"
+       [default-call "fhsl_tx_contains"]
+       [seed-call "fhsl_tx_add"]
+       [default-call "fhsl_tx_remove"]]
+     ["C_FHSL_TX" "POLICY_LEAKY"
+       [default-call "c_fhsl_tx_contains"]
+       [seed-call "c_fhsl_tx_add"]
+       [default-call "c_fhsl_tx_remove_leaky"]]
+     ["STACKTRACK" "POLICY_LEAKY"
+       [stacktrack-call "skiplist_contains_pure"]
+       [stacktrack-call-ptr "skiplist_insert_pure"]
+       [stacktrack-call "skiplist_remove_pure"]]
+     ["STACKTRACK" "POLICY_RETIRE"
+       [stacktrack-call "skiplist_contains_forkscan"]
+       [stacktrack-call-ptr "skiplist_insert_forkscan"]
+       [stacktrack-call "skiplist_remove_forkscan"]]
+     ["STACKTRACK" "POLICY_HAZARD"
+       [stacktrack-call "skiplist_contains_hp"]
+       [stacktrack-call-ptr "skiplist_insert_hp"]
+       [stacktrack-call "skiplist_remove_hp"]]
+     ["STACKTRACK" "POLICY_STACKTRACK"
+       [stacktrack-call "skiplist_contains_stacktrack"]
+       [stacktrack-call-ptr "skiplist_insert_stacktrack"]
+       [stacktrack-call "skiplist_remove_stacktrack"]]
+     ["BT_LF" "POLICY_LEAKY"
+       [default-call "bt_lf_contains"]
+       [default-call "bt_lf_add"]
+       [default-call "bt_lf_remove"]]
+     ["C_BT_LF" "POLICY_LEAKY"
+       [default-call "c_bt_lf_contains"]
+       [default-call "c_bt_lf_add"]
+       [default-call "c_bt_lf_remove_leaky"]]
+     ["BT_TX" "POLICY_LEAKY"
+       [default-call "bt_tx_contains"]
+       [default-call "bt_tx_add"]
+       [default-call "bt_tx_remove_leaky"]]
+     ["BT_TX" "POLICY_RETIRE"
+       [default-call "bt_tx_contains"]
+       [default-call "bt_tx_add"]
+       [default-call "bt_tx_remove_retire"]]
+     ["C_FHSL_FC" "POLICY_LEAKY"
+       [flatcombining-call "c_fhsl_fc_contains"]
+       [flatcombining-call "c_fhsl_fc_add"]
+       [flatcombining-call "c_fhsl_fc_remove"]]
+    ]
+ ]
+
+@[define [make-bench contains insert remove]
+   [parse-stmts
+     while ptd.state[0] == STATE_RUN do
+         var action = fast_rand(&seed) % 100;
+         var val i64 = fast_rand(&seed) % config.upper_bound;
+         if action < read_action then
+             stats.read_attempts++;
+             if @[emit-expr contains] then
+                 stats.read_successes++;
+             fi
+         elif action < add_action then
+             stats.insert_attempts++;
+             if @[emit-expr insert] then
+                 stats.insert_successes++;
+             fi
+         else
+             stats.remove_attempts++;
+             if @[emit-expr remove] then
+                 stats.remove_successes++;
+             fi
+         fi
+     od
+   ]
+ ]
+
+@[define [config2bench config]
+   [let* [[bench [car config]]
+          [policy [car [cdr config]]]
+          [contains [car [cdr [cdr config]]]]
+          [insert [car [cdr [cdr [cdr config]]]]]
+          [remove [car [cdr [cdr [cdr [cdr config]]]]]]
+         ]
+     [list [parse-expr @[emit-ident bench] == config.benchmark
+                       && @[emit-ident policy] == config.policy]
+           [make-bench contains insert remove]
+     ]
+   ]
+ ]
+
 /** Return the time in seconds.
  */
 def hires_timer () -> f64
@@ -417,343 +539,9 @@ begin
     od
     var read_action = 100 - config.update_rate;
     var add_action = read_action + (config.update_rate / 2);
-    while ptd.state[0] == STATE_RUN do
-        var action = fast_rand(&seed) % 100;
-        var val i64 = fast_rand(&seed) % config.upper_bound;
-        switch bench with
 
-/***************************************************************************/
-/*                    fixed-height skip list, lock free                    */
-/***************************************************************************/
+    @[construct-if [map config2bench benchmarks]]
 
-        xcase FHSL_LF:
-            if action < read_action then
-                stats.read_attempts++;
-                if fhsl_lf_contains(set, val) then
-                    stats.read_successes++;
-                fi
-            elif action < add_action then
-                stats.insert_attempts++;
-                if fhsl_lf_add(&seed, set, val) then
-                    stats.insert_successes++;
-                fi
-            else
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if fhsl_lf_leaky_remove(set, val) then
-                        stats.remove_successes++;
-                    fi
-                else
-                    // policy = POLICY_RETIRE
-                    if fhsl_lf_remove(set, val) then
-                        stats.remove_successes++;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*            fixed-height skip list, lock free written in C               */
-/***************************************************************************/
-        xcase C_FHSL_LF:
-            if action < read_action then
-                stats.read_attempts++;
-                if c_fhsl_lf_contains(set, val) == 1 then
-                    stats.read_successes++;
-                fi
-            elif action < add_action then
-                stats.insert_attempts++;
-                if c_fhsl_lf_add(&seed, set, val) == 1 then
-                    stats.insert_successes++;
-                fi
-            else
-                stats.remove_attempts++;
-                switch policy with
-                xcase POLICY_LEAKY:
-                    if c_fhsl_lf_remove_leaky(set, val) == 1 then
-                        stats.remove_successes++;
-                    fi
-                xcase _:
-                    printf("error: unsupported mem policy for benchmark.\n");
-                    exit(1);
-                esac
-            fi
-
-/***************************************************************************/
-/*                     fixed-height skip list, blocking                    */
-/***************************************************************************/
-
-        xcase FHSL_B:
-            if action < read_action then
-                stats.read_attempts++;
-                if fhsl_b_contains(set, val) then
-                    stats.read_successes++;
-                fi
-            elif action < add_action then
-                stats.insert_attempts++;
-                if fhsl_b_add(&seed, set, val) then
-                    stats.insert_successes++;
-                fi
-            else
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if fhsl_b_leaky_remove(config.set, val) then
-                        stats.remove_successes++;
-                    fi
-                else
-                    // policy = POLICY_RETIRE
-                    if fhsl_b_remove(config.set, val) then
-                        stats.remove_successes++;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*                  fixed-height skip list, transactional                  */
-/***************************************************************************/
-
-            // Note: TBD: This is where a nice structural macro would do
-            // nicely.  This is basically the same code as the previous
-            // two cases.  Think about syntax for this kind of thing.
-        xcase FHSL_TX:
-            if action < read_action then
-                stats.read_attempts++;
-                if fhsl_tx_contains(set, val) then
-                    stats.read_successes++;
-                fi
-            elif action < add_action then
-                stats.insert_attempts++;
-                if fhsl_tx_add(&seed, set, val) then
-                    stats.insert_successes++;
-                fi
-            else
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if fhsl_tx_leaky_remove(set, val) then
-                        stats.remove_successes++;
-                    fi
-                else
-                    // policy = POLICY_RETIRE
-                    if fhsl_tx_remove(set, val) then
-                        stats.remove_successes++;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*          fixed-height skip list, transactional, written in C            */
-/***************************************************************************/
-
-            // Note: TBD: This is where a nice structural macro would do
-            // nicely.  This is basically the same code as the previous
-            // two cases.  Think about syntax for this kind of thing.
-        xcase C_FHSL_TX:
-            if action < read_action then
-                stats.read_attempts++;
-                if c_fhsl_tx_contains(set, val) then
-                    stats.read_successes++;
-                fi
-            elif action < add_action then
-                stats.insert_attempts++;
-                if c_fhsl_tx_add(&seed, set, val) then
-                    stats.insert_successes++;
-                fi
-            else
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if c_fhsl_tx_remove_leaky(set, val) then
-                        stats.remove_successes++;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*                    StackTrack fixed-height, blocking                    */
-/***************************************************************************/
-
-        xcase STACKTRACK:
-            if action < read_action then
-                stats.read_attempts++;
-                switch policy with
-                xcase POLICY_LEAKY:
-                    if 0 != skiplist_contains_pure(st_thread, set, val) then
-                        stats.read_successes++;
-                    fi
-                xcase POLICY_RETIRE:
-                    if 0 != skiplist_contains_forkscan(st_thread, set, val)
-                    then
-                        stats.read_successes++;
-                    fi
-                xcase POLICY_HAZARD:
-                    if 0 != skiplist_contains_hp(st_thread, set, val) then
-                        stats.read_successes++;
-                    fi
-                xcase POLICY_STACKTRACK:
-                    if 0 != skiplist_contains_stacktrack(st_thread, set, val)
-                    then
-                        stats.read_successes++;
-                    fi
-                xcase _:
-                    printf("error: unsupported mem policy for benchmark.\n");
-                    exit(1);
-                esac
-            elif action < add_action then
-                stats.insert_attempts++;
-                switch policy with
-                xcase POLICY_LEAKY:
-                    if nil != skiplist_insert_pure(st_thread, set, val) then
-                        stats.insert_successes++;
-                    fi
-                xcase POLICY_RETIRE:
-                    if nil != skiplist_insert_forkscan(st_thread, set, val)
-                    then
-                        stats.insert_successes++;
-                    fi
-                xcase POLICY_HAZARD:
-                    if nil != skiplist_insert_hp(st_thread, set, val) then
-                        stats.insert_successes++;
-                    fi
-                xcase POLICY_STACKTRACK:
-                    if nil != skiplist_insert_stacktrack(st_thread, set, val)
-                    then
-                        stats.insert_successes++;
-                    fi
-                xcase _:
-                    printf("error: unsupported mem policy for benchmark.\n");
-                    exit(1);
-                esac
-            else
-                stats.remove_attempts++;
-                switch policy with
-                xcase POLICY_LEAKY:
-                    if 0 != skiplist_remove_pure(st_thread, set, val) then
-                        stats.remove_successes++;
-                    fi
-                xcase POLICY_RETIRE:
-                    if 0 != skiplist_remove_forkscan(st_thread, set, val) then
-                        stats.remove_successes++;
-                    fi
-                xcase POLICY_HAZARD:
-                    if 0 != skiplist_remove_hp(st_thread, set, val) then
-                        stats.remove_successes++;
-                    fi
-                xcase POLICY_STACKTRACK:
-                    if 0 != skiplist_remove_stacktrack(st_thread, set, val)
-                    then
-                        stats.remove_successes++;
-                    fi
-                xcase _:
-                    printf("error: unsupported mem policy for benchmark.\n");
-                    exit(1);
-                esac
-            fi
-
-/***************************************************************************/
-/*                   lock-free binary tree written in DEF                  */
-/***************************************************************************/
-        
-        xcase BT_LF:
-            if action < read_action then
-                stats.read_attempts++;
-                if bt_lf_contains(set, val) then
-                    stats.read_successes++;
-                fi
-            elif action < add_action then
-                stats.insert_attempts++;
-                if bt_lf_add(set, val) then
-                    stats.insert_successes++;
-                fi
-            else
-                stats.remove_attempts++;
-                if bt_lf_remove(set, val) then
-                    stats.remove_successes++;
-                fi
-            fi
-
-/***************************************************************************/
-/*                      lock-free binary tree written in C                 */
-/***************************************************************************/
-        
-        xcase C_BT_LF:
-            if action < read_action then
-                stats.read_attempts++;
-                if 0 != c_bt_lf_contains(set, val) then
-                    stats.read_successes++;
-                fi
-            elif action < add_action then
-                stats.insert_attempts++;
-                if 0 != c_bt_lf_add(set, val) then
-                    stats.insert_successes++;
-                fi
-            else
-                stats.remove_attempts++;
-                switch policy with
-                xcase POLICY_LEAKY:
-                    if 0 != c_bt_lf_remove_leaky(set, val) then
-                        stats.remove_successes++;
-                    fi
-                xcase _:
-                    printf("error: unsupported mem policy for benchmark.\n");
-                    exit(1);
-                esac
-            fi
-/***************************************************************************/
-/*                    flat combining skiplist written in C                 */
-/***************************************************************************/
-        
-        xcase C_FHSL_FC:
-            if action < read_action then
-                stats.read_attempts++;
-                if 0 != c_fhsl_fc_contains(set, val, ptd.id) then
-                    stats.read_successes++;
-                fi
-            elif action < add_action then
-                stats.insert_attempts++;
-                if 0 != c_fhsl_fc_add(set, val, ptd.id) then
-                    stats.insert_successes++;
-                fi
-            else
-                stats.remove_attempts++;
-                if 0 != c_fhsl_fc_remove(set, val, ptd.id) then
-                    stats.remove_successes++;
-                fi
-            fi
-
-/***************************************************************************/
-/*                transactional binary tree written in DEF                 */
-/***************************************************************************/
-        
-        xcase BT_TX:
-            if action < read_action then
-                stats.read_attempts++;
-                if bt_tx_contains(set, val) then
-                    stats.read_successes++;
-                fi
-            elif action < add_action then
-                stats.insert_attempts++;
-                if bt_tx_add(set, val) then
-                    stats.insert_successes++;
-                fi
-            else
-                stats.remove_attempts++;
-                switch policy with
-                xcase POLICY_LEAKY:
-                   if bt_tx_remove_leaky(set, val) then
-                        stats.remove_successes++;
-                    fi
-                xcase POLICY_RETIRE:
-                    if bt_tx_remove_retire(set, val) then
-                        stats.remove_successes++;
-                    fi
-                xcase _:
-                    printf("error: unsupported mem policy for benchmark.\n");
-                    exit(1);
-                esac
-            fi
-        xcase _:
-            printf("error: unknown benchmark configuration.\n");
-            exit(1);
-        esac
-    od
     printf("FINISHED\n");
     if bench == STACKTRACK then
         // Cleanup StackTrack.
