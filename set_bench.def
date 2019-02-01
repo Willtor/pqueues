@@ -193,9 +193,9 @@ typedef init_thread_data_t =
 @[define [config2bench config]
    [let* [[bench [car config]]
           [policy [car [cdr config]]]
-          [contains [car [cdr [cdr config]]]]
-          [insert [car [cdr [cdr [cdr config]]]]]
-          [remove [car [cdr [cdr [cdr [cdr config]]]]]]
+          [contains [list-ref config 3]]
+          [insert [list-ref config 4]]
+          [remove [list-ref config 5]]
          ]
      [list [parse-expr @[emit-ident bench] == config.benchmark
                        && @[emit-ident policy] == config.policy]
@@ -417,34 +417,27 @@ begin
     // Be sure the configuration is valid -- i.e., does the given data
     // structure support the requested memory policy, etc.?
 
-    switch { config.benchmark, config.policy } with
-    xcase { FHSL_LF, POLICY_LEAKY }:
-    ocase { FHSL_LF, POLICY_RETIRE }:
-    ocase { FHSL_B, POLICY_LEAKY }:
-    ocase { FHSL_B, POLICY_RETIRE }:
-    ocase { C_FHSL_LF, POLICY_LEAKY}:
-    ocase { FHSL_TX, POLICY_LEAKY }:
-    ocase { FHSL_TX, POLICY_RETIRE }:
-    ocase { C_FHSL_TX, POLICY_LEAKY}:
-    ocase { STACKTRACK, POLICY_LEAKY }:
-    ocase { STACKTRACK, POLICY_RETIRE }:
-    ocase { STACKTRACK, POLICY_HAZARD }:
-    ocase { STACKTRACK, POLICY_STACKTRACK }:
-    ocase { C_BT_LF, POLICY_LEAKY}:
-    ocase { C_BT_LF, POLICY_RETIRE}:
-    ocase { BT_LF, POLICY_LEAKY}:
-    ocase { BT_LF, POLICY_RETIRE}:
-    ocase { BT_TX, POLICY_LEAKY }:
-    ocase { BT_TX, POLICY_RETIRE }:
-    ocase { C_FHSL_FC, _ }:
-    xcase _:
-        printf("Unsupported configuration:\n");
-        printf("  benchmark: %s\n  policy: %s\n",
-               string_of_benchmark(config.benchmark),
-               string_of_policy(config.policy));
-        printf("No implementation for this combination.\n");
-        exit(1);
-    esac
+    @[define [legal-config config]
+       [let
+         [ [bench [car config]]
+           [policy [car [cdr config]]]
+         ]
+         [list
+           [parse-expr @[emit-ident bench] == config.benchmark
+                       && @[emit-ident policy] == config.policy]
+           [parse-stmts return; ]
+         ]
+       ]
+     ]
+
+    @[construct-if [map legal-config benchmarks]]
+
+    printf("Unsupported configuration:\n");
+    printf("  benchmark: %s\n  policy: %s\n",
+           string_of_benchmark(config.benchmark),
+           string_of_policy(config.policy));
+    printf("No implementation for this combination.\n");
+    exit(1);
 end
 
 def print_config (config *config_t) -> void
