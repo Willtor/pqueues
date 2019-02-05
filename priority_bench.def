@@ -433,39 +433,25 @@ begin
     // Be sure the configuration is valid -- i.e., does the given data
     // structure support the requested memory policy, etc.?
 
-    switch { config.benchmark, config.policy } with
-    xcase { FHSL_LF, POLICY_LEAKY }:
-    ocase { FHSL_LF, POLICY_RETIRE }:
-    ocase { C_FHSL_LF, POLICY_LEAKY }:
-    ocase { C_FHSL_LF, POLICY_RETIRE }:
-    ocase { FHSL_TX, POLICY_LEAKY }:
-    ocase { SL_PQ, POLICY_LEAKY }:
-    ocase { SL_PQ, POLICY_RETIRE }:
-    ocase { SPRAY, POLICY_LEAKY }:
-    ocase { SPRAY, POLICY_RETIRE }:
-    ocase { SPRAY_TX, POLICY_LEAKY }:
-    ocase { C_SPRAY, POLICY_LEAKY }:
-    ocase { C_SPRAY, POLICY_RETIRE }:
-    ocase { C_SPRAY_TX, POLICY_LEAKY }:
-    ocase { C_SL_PQ, POLICY_LEAKY }:
-    ocase { C_SL_PQ, POLICY_RETIRE }:
-    ocase { LJ_PQ, POLICY_LEAKY }:
-    ocase { LJ_PQ, POLICY_RETIRE }:
-    ocase { C_LJ_PQ, POLICY_LEAKY }:
-    ocase { C_LJ_PQ, POLICY_RETIRE }:
-    ocase { MQ_LOCKED_BTREE, _ }:
-    ocase { C_HUNT, _ }:
-    ocase { C_MOUNDS, POLICY_LEAKY }:
-    ocase { C_MOUNDS, POLICY_RETIRE }:
-    ocase { C_FHSL_FC, _ }:
-    xcase _:
-        printf("Unsupported configuration:\n");
-        printf("  benchmark: %s\n  policy: %s\n",
-               string_of_benchmark(config.benchmark),
-               string_of_policy(config.policy));
-        printf("No implementation for this combination.\n");
-        exit(1);
-    esac
+    @[define [legal-config config]
+       [let [[bench [car config]]
+             [policy [car [cdr config]]]]
+         [list
+           [parse-expr @[emit-ident bench] == config.benchmark
+                       && @[emit-ident policy] == config.policy]
+           [parse-stmts return; ]
+         ]
+       ]
+     ]
+
+    @[construct-if [map legal-config benchmarks]]
+
+    printf("Unsupported configuration:\n");
+    printf("  benchmark: %s\n  policy: %s\n",
+           string_of_benchmark(config.benchmark),
+           string_of_policy(config.policy));
+    printf("No implementation for this combination.\n");
+    exit(1);
 end
 
 def print_config (config *config_t) -> void
