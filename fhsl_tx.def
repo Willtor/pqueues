@@ -142,15 +142,15 @@ begin
     return node != nil;
 end
 
-/** Pop the front node from the list.  Return true iff there was a node to pop.
- *  Leak the memory.
+/** Pop the front node from the list.  Return the value popped.  Leak the
+ *  memory.
  */
 export
-def fhsl_tx_leaky_pop_min (set *fhsl_tx) -> bool
+def fhsl_tx_leaky_pop_min (set *fhsl_tx) -> i64
 begin
     var node_removed *node = nil;
     atomic begin
-        var head_node *node= set.head.next[0];
+        var head_node *node = set.head.next[0];
         if head_node != &set.tail then
             node_removed = head_node;
             for var i = 0; i <= node_removed.toplevel; ++i do
@@ -158,7 +158,7 @@ begin
             od
         fi
     end
-    return node_removed != nil;
+    return node_removed.val; // Segfaults if the queue is empty.
 end
 
 
