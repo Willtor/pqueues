@@ -44,12 +44,13 @@ end
  *  implementation allows duplicate values.
  */
 export
-def mq_locked_btree_add (seed *u64, mq *mq_locked_btree, val i64) -> void
+def mq_locked_btree_add (seed *u64, mq *mq_locked_btree, val i64) -> bool
 begin
     var a = random_val(seed, mq.count);
     tts_lock(&mq.sets[a].lock);
     serial_btree_insert(mq.sets[a].btree, val);
     tts_unlock(&mq.sets[a].lock);
+    return true;
 end
 
 /** Remove the minimum value.  There is no leaky version.
