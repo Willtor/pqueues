@@ -5,6 +5,7 @@ import "stdio.h";
 import "time.h";
 import "stdlib.h";
 import "thread_pinner.h"; 
+import "papi_interface.h";
 
 // Sets with naive pop min:
 import "fhsl_lf.defi";
@@ -83,7 +84,8 @@ typedef per_thread_data_t =
         config         *config_t,
         id             i32,
         state          volatile *state_t,
-        stats          stats_t
+        stats          stats_t,
+        PAPI_counters  *i64
     };
 
 typedef init_thread_data_t =
@@ -389,7 +391,7 @@ begin
     return cast f64 (successes) * 100.0F64 / cast f64 (attempts);
 end
 
-def print_stats (stats *stats_t, runtime f64) -> void
+def print_stats (stats *stats_t, runtime f64, PAPI_counters *i64) -> void
 begin
     var total_ops i64 = 0;
     printf("  insert-attempts    : %lld\n", stats.insert_attempts);
@@ -405,9 +407,17 @@ begin
 
     total_ops = stats.insert_successes + stats.remove_successes;
 
+    var total_opsf = cast f64 (total_ops);
+
     printf("  total-operations   : %lld\n", total_ops);
     printf("  ops-per-second     : %lld\n",
            cast i64 (total_ops / runtime));
+    printf("L1 cache misses per op %f\nL2 cache misses per op %f\nInstruction stalls per op %f\nTotal instructions per op %f\nL1 data cache misses per op %f\n",
+        PAPI_counters[0] / total_opsf,
+        PAPI_counters[1] / total_opsf,
+        PAPI_counters[2] / total_opsf,
+        PAPI_counters[3] / total_opsf,
+        PAPI_counters[4] / total_opsf);
 end
 
 def print_csv (config *config_t, stats *stats_t, runtime f64) -> void
@@ -440,6 +450,9 @@ begin
         // busy-wait.
     od
     var insert_action = (fast_rand(&seed) % 100) < 50;
+
+    var register_res = register_thread();
+    var start_res = start_counters();
     
     while ptd.state[0] == STATE_RUN do
         var val i64 = fast_rand(&seed) % config.upper_bound;
@@ -807,6 +820,9 @@ begin
             exit(1);
         esac
     od
+    
+    ptd.PAPI_counters = stop_counters();
+
     printf("FINISHED\n");
 
     // Store this thread's statistics in the per-thread-data.
@@ -958,8 +974,12 @@ begin
     verify_config(&config);
     print_config(&config);
 
+    var res = library_init();
+    printf("%d\n", res);
+
     printf("Initializing set.\n");
     initialize_pqueue(&config, &seed);
+    
 
     printf("Starting threads.\n");
     var thread_pinner *thread_pinner_t = thread_pinner_create();
@@ -970,7 +990,8 @@ begin
             { &config,
               i,
               &state,
-              { 0, 0, 0, 0 }
+              { 0, 0, 0, 0 },
+              new [5]i64
             };
         var ret = pthread_create(&tids[i], nil, thread, &ptds[i]);
         if ret != 0 then
@@ -1007,19 +1028,24 @@ begin
     // Print out the statistics.
     puts("Summary:");
     printf("  runtime (s) : %.9f\n", runtime);
+    var PAPI_counters = new [5]i64;
+    for var j = 0; j < 5; j++ do PAPI_counters[j] = 0; od
 
     var totals stats_t = { 0, 0, 0, 0 };
     for var i = 0; i < config.thread_count; ++i do
         printf("statistics for thread %d\n", i);
-        print_stats(&ptds[i].stats, runtime);
+        print_stats(&ptds[i].stats, runtime, ptds[i].PAPI_counters);
         totals.insert_attempts += ptds[i].stats.insert_attempts;
         totals.insert_successes += ptds[i].stats.insert_successes;
         totals.remove_attempts += ptds[i].stats.remove_attempts;
         totals.remove_successes += ptds[i].stats.remove_successes;
+        for var j = 0; j < 5; j++ do
+            PAPI_counters[j] += ptds[i].PAPI_counters[j];
+        od
     od
 
     printf("total statistics:\n");
-    print_stats(&totals, runtime);
+    print_stats(&totals, runtime, PAPI_counters);
     if config.csv then print_csv(&config, &totals, runtime); fi
 
     delete tids;
