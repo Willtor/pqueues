@@ -19,6 +19,14 @@ import "bt_tx.defi";
 import "c_bt_lf.h";
 import "c_fhsl_fc.h";
 
+@[define default-benchmark "FHSL_LF"]
+@[define default-policy "POLICY_LEAKY"]
+@[define default-duration 1]
+@[define default-thread-count 1]
+@[define default-init-size 256]
+@[define default-upper-bound 512]
+@[define default-update-rate 10]
+
 typedef benchmark_t = enum
     | FHSL_LF
     | FHSL_B
@@ -195,9 +203,9 @@ typedef init_thread_data_t =
 @[define [config2bench config]
    [let* [[bench [car config]]
           [policy [car [cdr config]]]
-          [contains [car [cdr [cdr config]]]]
-          [insert [car [cdr [cdr [cdr config]]]]]
-          [remove [car [cdr [cdr [cdr [cdr config]]]]]]
+          [contains [list-ref config 3]]
+          [insert [list-ref config 4]]
+          [remove [list-ref config 5]]
          ]
      [list [parse-expr @[emit-ident bench] == config.benchmark
                        && @[emit-ident policy] == config.policy]
@@ -266,9 +274,12 @@ def help (bench *char) -> void
 begin
     printf("Usage: %s [OPTIONS]\n", bench);
     printf("  -h, --help: This help message.\n");
-    printf("  -t <n>: Set the number of threads. (default = 1)\n");
-    printf("  -d <n>: Benchmark duration in seconds. (default = 1)\n");
-    printf("  -b <benchmark>: Set the benchmark. (default = fhsl_lf)\n");
+    printf("  -t <n>: Set the number of threads. (default = %d)\n",
+           @default-thread-count);
+    printf("  -d <n>: Benchmark duration in seconds. (default = %d)\n",
+           @default-duration);
+    printf("  -b <benchmark>: Set the benchmark. (default = %s)\n",
+           string_of_benchmark(@[emit-ident default-benchmark]));
     printf("     * fhsl_lf: Fixed-height skip list; lock-free.\n");
     printf("     * fhsl_b: Fixed-height skip list; blocking.\n");
     printf("     * c_fhsl_lf: Fixed-height skip list; lock-free, written in C.\n");
@@ -278,14 +289,18 @@ begin
     printf("     * bt_tx: Use the transactional binary tree written in DEF.\n");
     printf("     * c_bt_lf: Use the lock-free binary tree written in C.\n");
     printf("     * c_fhsl_fc: Use the flat combining skiplist written in C.\n");
-    printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
+    printf("  -p <mem_policy>: Set the memory policy. (default = %s)\n",
+           string_of_policy(@[emit-ident default-policy]));
     printf("     * leaky: Leak removed nodes.\n");
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
     printf("     * hazard: Hazard pointers (for stacktrack bench only).\n");
     printf("     * stacktrack: StackTrack (for stacktrack bench only).\n");
-    printf("  -i <n>: Initial set size. (default = 256)\n");
-    printf("  -r <n>: Range upper bound [0-n). (default = 512)\n");
-    printf("  -u <n>: Percent of ops that are updates. (default = 10)\n");
+    printf("  -i <n>: Initial set size. (default = %d)\n",
+           @default-init-size);
+    printf("  -r <n>: Range upper bound [0-n). (default = %d)\n",
+           @default-upper-bound);
+    printf("  -u <n>: Percent of ops that are updates. (default = %d)\n",
+           @default-update-rate);
     printf("  --csv: Generate a comma-separated value summary.\n");
     exit(127);
 end
@@ -321,7 +336,16 @@ end
 def read_args (argc i32, argv **char) -> config_t
 begin
     var config config_t =
-        { FHSL_LF, POLICY_LEAKY, false, 1, 1, 256, 512, 10, nil };
+        { @[emit-ident default-benchmark],
+          @[emit-ident default-policy],
+          false,
+          @default-duration,
+          @default-thread-count,
+          @default-init-size,
+          @default-upper-bound,
+          @default-update-rate,
+          nil
+        };
 
     for var i = 1; i < argc; ++i do
         switch argv[i] with
@@ -419,34 +443,27 @@ begin
     // Be sure the configuration is valid -- i.e., does the given data
     // structure support the requested memory policy, etc.?
 
-    switch { config.benchmark, config.policy } with
-    xcase { FHSL_LF, POLICY_LEAKY }:
-    ocase { FHSL_LF, POLICY_RETIRE }:
-    ocase { FHSL_B, POLICY_LEAKY }:
-    ocase { FHSL_B, POLICY_RETIRE }:
-    ocase { C_FHSL_LF, POLICY_LEAKY}:
-    ocase { FHSL_TX, POLICY_LEAKY }:
-    ocase { FHSL_TX, POLICY_RETIRE }:
-    ocase { C_FHSL_TX, POLICY_LEAKY}:
-    ocase { STACKTRACK, POLICY_LEAKY }:
-    ocase { STACKTRACK, POLICY_RETIRE }:
-    ocase { STACKTRACK, POLICY_HAZARD }:
-    ocase { STACKTRACK, POLICY_STACKTRACK }:
-    ocase { C_BT_LF, POLICY_LEAKY}:
-    ocase { C_BT_LF, POLICY_RETIRE}:
-    ocase { BT_LF, POLICY_LEAKY}:
-    ocase { BT_LF, POLICY_RETIRE}:
-    ocase { BT_TX, POLICY_LEAKY }:
-    ocase { BT_TX, POLICY_RETIRE }:
-    ocase { C_FHSL_FC, _ }:
-    xcase _:
-        printf("Unsupported configuration:\n");
-        printf("  benchmark: %s\n  policy: %s\n",
-               string_of_benchmark(config.benchmark),
-               string_of_policy(config.policy));
-        printf("No implementation for this combination.\n");
-        exit(1);
-    esac
+    @[define [legal-config config]
+       [let
+         [ [bench [car config]]
+           [policy [car [cdr config]]]
+         ]
+         [list
+           [parse-expr @[emit-ident bench] == config.benchmark
+                       && @[emit-ident policy] == config.policy]
+           [parse-stmts return; ]
+         ]
+       ]
+     ]
+
+    @[construct-if [map legal-config benchmarks]]
+
+    printf("Unsupported configuration:\n");
+    printf("  benchmark: %s\n  policy: %s\n",
+           string_of_benchmark(config.benchmark),
+           string_of_policy(config.policy));
+    printf("No implementation for this combination.\n");
+    exit(1);
 end
 
 def print_config (config *config_t) -> void

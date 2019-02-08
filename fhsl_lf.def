@@ -212,11 +212,11 @@ begin
     od
 end
 
-/** Pop the front node from the list.  Return true iff there was a node to pop.
- *  Leak the memory.
+/** Pop the front node from the list.  Return the value popped.  Leak the
+ *  memory.
  */
 export
-def fhsl_lf_leaky_pop_min (set *fhsl_lf) -> bool
+def fhsl_lf_leaky_pop_min (set *fhsl_lf) -> i64
 begin
     var preds [20]node_ptr;
     var succs [20]node_ptr;
@@ -252,16 +252,15 @@ begin
         if !marked && __builtin_cas(&node_to_remove.next[0], succ, mark(succ))
         then
             find(set, node_to_remove.key, preds, succs);
-            return true;
+            return node_to_remove.key;
         fi
     od
 end
 
-/** Pop the front node from the list.  Return true iff there was a node to pop.
- *  Don't leak the memory.
+/** Pop the front node from the list.  Return the value popped.
  */
 export
-def fhsl_lf_pop_min (set *fhsl_lf) -> bool
+def fhsl_lf_pop_min (set *fhsl_lf) -> i64
 begin
     var preds [20]node_ptr;
     var succs [20]node_ptr;
@@ -296,9 +295,10 @@ begin
         var marked = is_marked(succ);
         if !marked && __builtin_cas(&node_to_remove.next[0], succ, mark(succ))
         then
-            find(set, node_to_remove.key, preds, succs);
+            var val = node_to_remove.key;
+            find(set, val, preds, succs);
             retire node_to_remove;
-            return true;
+            return val;
         fi
     od
 end

@@ -95,6 +95,104 @@ typedef init_thread_data_t =
         id            i64
     };
 
+@[define [default-add fname]
+   [parse-expr @[emit-ident fname](pqueue, val) ]]
+@[define [seed-add fname]
+   [parse-expr @[emit-ident fname](&seed, pqueue, val) ]]
+@[define [id-add fname]
+   [parse-expr @[emit-ident fname](pqueue, val, ptd.id) ]]
+@[define [default-pop-min fname]
+   [parse-expr true == @[emit-ident fname](pqueue) ]]
+@[define [seed-pop-min fname]
+   [parse-expr true == @[emit-ident fname](&seed, pqueue) ]]
+@[define [id-pop-min fname]
+   [parse-expr @[emit-ident fname](pqueue, ptd.id) ]]
+
+@[define benchmarks
+   `[ ["FHSL_LF" "POLICY_LEAKY"
+       [seed-add "fhsl_lf_add"] [default-pop-min "fhsl_lf_leaky_pop_min"] ]
+      ["FHSL_LF" "POLICY_RETIRE"
+       [seed-add "fhsl_lf_add"] [default-pop-min "fhsl_lf_pop_min"] ]
+      ["C_FHSL_LF" "POLICY_LEAKY"
+       [seed-add "c_fhsl_lf_add"] [default-pop-min "c_fhsl_lf_pop_min_leaky"] ]
+      ["C_FHSL_LF" "POLICY_RETIRE"
+       [seed-add "c_fhsl_lf_add"] [default-pop-min "fhsl_lf_pop_min"] ]
+      ["FHSL_TX" "POLICY_LEAKY"
+       [seed-add "fhsl_tx_add"] [default-pop-min "fhsl_tx_leaky_pop_min"] ]
+      ["SL_PQ" "POLICY_LEAKY"
+       [seed-add "sl_pq_add"] [default-pop-min "sl_pq_leaky_pop_min"] ]
+      ["SL_PQ" "POLICY_RETIRE"
+       [seed-add "sl_pq_add"] [default-pop-min "sl_pq_pop_min"] ]
+      ["C_SL_PQ" "POLICY_LEAKY"
+       [seed-add "c_sl_pq_add"] [default-pop-min "c_sl_pq_leaky_pop_min"] ]
+      ["C_SL_PQ" "POLICY_RETIRE"
+       [seed-add "c_sl_pq_add"] [default-pop-min "c_sl_pq_pop_min"] ]
+      ["SPRAY" "POLICY_LEAKY"
+       [seed-add "spray_pq_add"] [seed-pop-min "spray_pq_leaky_pop_min"] ]
+      ["SPRAY" "POLICY_RETIRE"
+       [seed-add "spray_pq_add"] [seed-pop-min "spray_pq_pop_min"] ]
+      ["SPRAY_TX" "POLICY_LEAKY"
+       [seed-add "spray_tx_pq_add"]
+       [seed-pop-min "spray_tx_pq_leaky_pop_min"] ]
+      ["C_SPRAY" "POLICY_LEAKY"
+       [seed-add "c_spray_pq_add"]
+       [seed-pop-min "c_spray_pq_leaky_pop_min"] ]
+      ["C_SPRAY" "POLICY_RETIRE"
+       [seed-add "c_spray_pq_add"]
+       [seed-pop-min "c_spray_pq_pop_min"] ]
+      ["C_SPRAY_TX" "POLICY_LEAKY"
+       [seed-add "c_spray_pq_tx_add"]
+       [seed-pop-min "c_spray_pq_tx_pop_min_leaky"] ]
+      ["LJ_PQ" "POLICY_LEAKY"
+       [seed-add "lj_pq_add"] [default-pop-min "lj_pq_leaky_pop_min"] ]
+      ["LJ_PQ" "POLICY_RETIRE"
+       [seed-add "lj_pq_add"] [default-pop-min "lj_pq_pop_min"] ]
+      ["C_LJ_PQ" "POLICY_LEAKY"
+       [seed-add "c_lj_pq_add"] [default-pop-min "c_lj_pq_leaky_pop_min"] ]
+      ["C_LJ_PQ" "POLICY_RETIRE"
+       [seed-add "c_lj_pq_add"] [default-pop-min "c_lj_pq_pop_min"] ]
+      ["MQ_LOCKED_BTREE" "POLICY_RETIRE"
+       [seed-add "mq_locked_btree_add"]
+       [seed-pop-min "mq_locked_btree_pop_min"] ]
+      ["C_HUNT" "POLICY_LEAKY"
+       [default-add "c_hunt_pq_add"]
+       [default-pop-min "c_hunt_pq_leaky_pop_min"] ]
+      ["C_MOUNDS" "POLICY_LEAKY"
+       [seed-add "c_mound_pq_add"]
+       [default-pop-min "c_mound_pq_leaky_pop_min"] ]
+      ["C_MOUNDS" "POLICY_RETIRE"
+       [seed-add "c_mound_pq_add"] [default-pop-min "c_mound_pq_pop_min"] ]
+      ["C_FHSL_FC" "POLICY_RETIRE"
+       [id-add "c_fhsl_fc_add"]
+       [id-pop-min "c_fhsl_fc_pop_min"] ]
+    ]
+ ]
+
+@[define [make-random-loop insert pop-min]
+   [parse-stmts
+     while ptd.state[0] == STATE_RUN do
+         var val i64 = fast_rand(&seed) % config.upper_bound;
+         if insert_action then
+             stats.insert_attempts++;
+             if @[emit-expr insert] then
+                 stats.insert_successes++;
+                 insert_action = false;
+             fi
+         else // insert_action = false.
+             stats.remove_attempts++;
+             @[emit-expr pop-min];
+             stats.remove_successes++;
+             insert_action = true;
+         fi
+     od
+   ]
+ ]
+
+@[define [make-cond benchmark policy]
+   [parse-expr @[emit-ident benchmark] == bench
+               && @[emit-ident policy] == policy] ]
+
+
 /** Return the time in seconds.
  */
 def hires_timer () -> f64
@@ -336,39 +434,25 @@ begin
     // Be sure the configuration is valid -- i.e., does the given data
     // structure support the requested memory policy, etc.?
 
-    switch { config.benchmark, config.policy } with
-    xcase { FHSL_LF, POLICY_LEAKY }:
-    ocase { FHSL_LF, POLICY_RETIRE }:
-    ocase { C_FHSL_LF, POLICY_LEAKY }:
-    ocase { C_FHSL_LF, POLICY_RETIRE }:
-    ocase { FHSL_TX, POLICY_LEAKY }:
-    ocase { SL_PQ, POLICY_LEAKY }:
-    ocase { SL_PQ, POLICY_RETIRE }:
-    ocase { SPRAY, POLICY_LEAKY }:
-    ocase { SPRAY, POLICY_RETIRE }:
-    ocase { SPRAY_TX, POLICY_LEAKY }:
-    ocase { C_SPRAY, POLICY_LEAKY }:
-    ocase { C_SPRAY, POLICY_RETIRE }:
-    ocase { C_SPRAY_TX, POLICY_LEAKY }:
-    ocase { C_SL_PQ, POLICY_LEAKY }:
-    ocase { C_SL_PQ, POLICY_RETIRE }:
-    ocase { LJ_PQ, POLICY_LEAKY }:
-    ocase { LJ_PQ, POLICY_RETIRE }:
-    ocase { C_LJ_PQ, POLICY_LEAKY }:
-    ocase { C_LJ_PQ, POLICY_RETIRE }:
-    ocase { MQ_LOCKED_BTREE, _ }:
-    ocase { C_HUNT, _ }:
-    ocase { C_MOUNDS, POLICY_LEAKY }:
-    ocase { C_MOUNDS, POLICY_RETIRE }:
-    ocase { C_FHSL_FC, _ }:
-    xcase _:
-        printf("Unsupported configuration:\n");
-        printf("  benchmark: %s\n  policy: %s\n",
-               string_of_benchmark(config.benchmark),
-               string_of_policy(config.policy));
-        printf("No implementation for this combination.\n");
-        exit(1);
-    esac
+    @[define [legal-config config]
+       [let [[bench [car config]]
+             [policy [car [cdr config]]]]
+         [list
+           [parse-expr @[emit-ident bench] == config.benchmark
+                       && @[emit-ident policy] == config.policy]
+           [parse-stmts return; ]
+         ]
+       ]
+     ]
+
+    @[construct-if [map legal-config benchmarks]]
+
+    printf("Unsupported configuration:\n");
+    printf("  benchmark: %s\n  policy: %s\n",
+           string_of_benchmark(config.benchmark),
+           string_of_policy(config.policy));
+    printf("No implementation for this combination.\n");
+    exit(1);
 end
 
 def print_config (config *config_t) -> void
@@ -450,379 +534,21 @@ begin
         // busy-wait.
     od
     var insert_action = (fast_rand(&seed) % 100) < 50;
-
+    
     var register_res = register_thread();
     var start_res = start_counters();
-    
-    while ptd.state[0] == STATE_RUN do
-        var val i64 = fast_rand(&seed) % config.upper_bound;
-        switch bench with
-/***************************************************************************/
-/*                    fixed-height skip list, lock free                    */
-/***************************************************************************/
-        
-        xcase FHSL_LF:
-            if insert_action then
-                stats.insert_attempts++;
-                if fhsl_lf_add(&seed, pqueue, val) then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else // insert_action == false.
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if fhsl_lf_leaky_pop_min(pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                else
-                    // policy = POLICY_RETIRE
-                    if fhsl_lf_pop_min(pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
-            
-/***************************************************************************/
-/*                  C fixed-height skip list, lock free                    */
-/***************************************************************************/
-        
-        xcase C_FHSL_LF:
-            if insert_action then
-                stats.insert_attempts++;
-                if c_fhsl_lf_add(&seed, pqueue , val) == 1 then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else // insert_action == false.
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if c_fhsl_lf_pop_min_leaky(pqueue) == 1 then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                else
-                    // policy = POLICY_RETIRE
-                    if c_fhsl_lf_pop_min(pqueue) == 1 then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
 
-/***************************************************************************/
-/*                 fixed-height skip list, transactional                   */
-/***************************************************************************/
+    @[define [random-case config]
+       [let [[bench [car config]]
+             [policy [car [cdr config]]]
+             [insert [list-ref config 3]]
+             [pop-min [list-ref config 4]]]
+         [list [make-cond bench policy] [make-random-loop insert pop-min]]
+       ]
+     ]
 
-        xcase FHSL_TX:
-            if insert_action then
-                stats.insert_attempts++;
-                if fhsl_tx_add(&seed, pqueue, val) then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else // insert_action == false.
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if fhsl_tx_leaky_pop_min(pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*           Shavit-Lotan PQ with underlying lock-free skip-list           */
-/***************************************************************************/
-
-        xcase SL_PQ:
-            if insert_action then
-                stats.insert_attempts++;
-                if sl_pq_add(&seed, pqueue, val) then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else // insert_action == false.
-                stats.remove_attempts++;
-                if policy == POLICY_RETIRE then
-                    if sl_pq_pop_min(pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                else 
-                    if sl_pq_leaky_pop_min(pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*         C Shavit-Lotan PQ with underlying lock-free skip-list           */
-/***************************************************************************/
-
-        xcase C_SL_PQ:
-            if insert_action then
-                stats.insert_attempts++;
-                if 1 == c_sl_pq_add(&seed, pqueue, val) then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else // insert_action == false.
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if 1 == c_sl_pq_leaky_pop_min(pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                else
-                    // policy = POLICY_RETIRE
-                    if 1 == c_sl_pq_pop_min(pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*             Spray-list with underlying lock-free skip-list              */
-/***************************************************************************/
-
-        xcase SPRAY:
-            if insert_action then
-                stats.insert_attempts++;
-                if spray_pq_add(&seed, pqueue, val) then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else // insert_action == false.
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if spray_pq_leaky_pop_min(&seed, pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                else
-                    // policy = POLICY_RETIRE
-                    if spray_pq_pop_min(&seed, pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*           Transactional Spray-list with underlying skip-list            */
-/***************************************************************************/
-
-        xcase SPRAY_TX:
-            if insert_action then
-                stats.insert_attempts++;
-                if spray_tx_pq_add(&seed, pqueue, val) then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else // insert_action == false.
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if spray_tx_pq_leaky_pop_min(&seed, pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*             C Spray-list with underlying lock-free skip-list             */
-/***************************************************************************/
-
-        xcase C_SPRAY:
-            if insert_action then
-                stats.insert_attempts++;
-                if c_spray_pq_add(&seed, pqueue, val) == 1 then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else // insert_action == false.
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if c_spray_pq_leaky_pop_min(&seed, pqueue) == 1 then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                else
-                    // policy = POLICY_RETIRE
-                    if c_spray_pq_pop_min(&seed, pqueue) == 1 then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*           C Spray-list with underlying transactional skip-list          */
-/***************************************************************************/
-
-        xcase C_SPRAY_TX:
-            if insert_action then
-                stats.insert_attempts++;
-                if 1 == c_spray_pq_tx_add(&seed, pqueue, val) then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else // insert_action == false.
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if 1 == c_spray_pq_tx_pop_min_leaky(&seed, pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*         Linden Jonsson pqueue with underlying lock-free skip-list        */
-/***************************************************************************/
-
-        xcase LJ_PQ:
-            if insert_action then
-                stats.insert_attempts++;
-                if lj_pq_add(&seed, pqueue, val) then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else // insert_action == false.
-                stats.remove_attempts++;
-                if policy == POLICY_RETIRE then
-                    if lj_pq_pop_min(pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                else
-                    if lj_pq_leaky_pop_min(pqueue) then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*        C Linden Jonsson pqueue with underlying lock-free skip-list       */
-/***************************************************************************/
-
-        xcase C_LJ_PQ:
-            if insert_action then
-                stats.insert_attempts++;
-                if c_lj_pq_add(&seed, pqueue, val) == 1 then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else // insert_action == false.
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if c_lj_pq_leaky_pop_min(pqueue) == 1 then
-                        
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                else 
-                    if c_lj_pq_pop_min(pqueue) == 1 then
-                        
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
-
-/***************************************************************************/
-/*                    Multiqueue based on locked btrees.                   */
-/***************************************************************************/
-
-        xcase MQ_LOCKED_BTREE:
-            if insert_action then
-                ++stats.insert_attempts;
-                mq_locked_btree_add(&seed, pqueue, val);
-                ++stats.insert_successes;
-                insert_action = false;
-            else
-                ++stats.remove_attempts;
-                if mq_locked_btree_pop_min(&seed, pqueue) then
-                    ++stats.remove_successes;
-                    insert_action = true;
-                fi
-            fi
-
-/***************************************************************************/
-/*                  Hunt et al heap based priority queue.                  */
-/***************************************************************************/
-
-        xcase C_HUNT:
-            if insert_action then
-                ++stats.insert_attempts;
-                c_hunt_pq_add(pqueue, val);
-                ++stats.insert_successes;
-                insert_action = false;
-            else
-                ++stats.remove_attempts;
-                if c_hunt_pq_leaky_pop_min(pqueue) then
-                    ++stats.remove_successes;
-                    insert_action = true;
-                fi
-            fi
-
-/***************************************************************************/
-/*                          Mounds priority queue.                         */
-/***************************************************************************/
-
-        xcase C_MOUNDS:
-            if insert_action then
-                ++stats.insert_attempts;
-                c_mound_pq_add(&seed, pqueue, val);
-                ++stats.insert_successes;
-                insert_action = false;
-            else
-                stats.remove_attempts++;
-                if policy == POLICY_LEAKY then
-                    if c_mound_pq_leaky_pop_min(pqueue) == 1 then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                else 
-                    if c_mound_pq_pop_min(pqueue) == 1 then
-                        stats.remove_successes++;
-                        insert_action = true;
-                    fi
-                fi
-            fi
-/***************************************************************************/
-/*                    flat combining skiplist written in C                 */
-/***************************************************************************/
-        
-        xcase C_FHSL_FC:
-            if insert_action then
-                stats.insert_attempts++;
-                if 0 != c_fhsl_fc_add(pqueue, val, ptd.id) then
-                    stats.insert_successes++;
-                    insert_action = false;
-                fi
-            else
-                stats.remove_attempts++;
-                if 0 != c_fhsl_fc_pop_min(pqueue, ptd.id) then
-                    stats.remove_successes++;
-                    insert_action = true;
-                fi
-            fi
-
-
-        xcase _:
-            printf("error: unknown benchmark configuration.\n");
-            exit(1);
-        esac
-    od
-    
+    @[construct-if [map random-case benchmarks]]
     ptd.PAPI_counters = stop_counters();
-
     printf("FINISHED\n");
 
     // Store this thread's statistics in the per-thread-data.
