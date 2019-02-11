@@ -218,7 +218,7 @@ end
  *  Don't leak the memory.
  */
 export
-def sl_pq_pop_min (pqueue *sl_pq_t) -> bool
+def sl_pq_pop_min (pqueue *sl_pq_t) -> i64
 begin
     for var curr = unmark(pqueue.head.next[0]); curr != &pqueue.tail; curr = unmark(curr.next[0]) do
         if curr.state == DELETED then
@@ -229,11 +229,12 @@ begin
         var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
         if res then
             mark_pointers(curr);
+            var popped = curr.priority;
             retire curr;
-            return true;
+            return popped;
         fi
     od
-    return false;
+    return 0;
 end
 
 def fast_rand (seed *u64) -> u64
