@@ -196,7 +196,7 @@ end
  *  Leak the memory.
  */
 export
-def sl_pq_leaky_pop_min (pqueue *sl_pq_t) -> bool
+def sl_pq_leaky_pop_min (pqueue *sl_pq_t) -> i64
 begin
     for var curr = unmark(pqueue.head.next[0]); curr != &pqueue.tail; curr = unmark(curr.next[0]) do
         if curr.state == DELETED then
@@ -204,13 +204,14 @@ begin
             continue;
         fi
         // TODO: Swap out for atomic swap
+        var popped = curr.priority;
         var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
         if res then
             mark_pointers(curr);
-            return true;
+            return popped;
         fi
     od
-    return false;
+    return 0;
 end
 
 /** Pop the front node from the list.  Return true iff there was a node to pop.
