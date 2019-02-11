@@ -56,10 +56,10 @@ end
 /** Remove the minimum value.  There is no leaky version.
  */
 export
-def mq_locked_btree_pop_min (seed *u64, mq *mq_locked_btree) -> bool
+def mq_locked_btree_pop_min (seed *u64, mq *mq_locked_btree) -> i64
 begin
     var { a, b } = pick_two(seed, mq.count);
-    var popped = false;
+    var popped = 0I64;
 
     tts_lock(&mq.sets[a].lock); // Ordered to avoid deadlock. a < b
     tts_lock(&mq.sets[b].lock);
@@ -73,19 +73,19 @@ begin
             var bmin = serial_btree_peek_min(bbtree);
             if amin <= bmin then
                 serial_btree_remove(abtree, amin);
+                popped = amin;
             else
                 serial_btree_remove(bbtree, bmin);
+                popped = bmin;
             fi
         else
-            serial_btree_remove(abtree,
-                                serial_btree_peek_min(abtree));
+            popped = serial_btree_peek_min(abtree);
+            serial_btree_remove(abtree, popped);
         fi
-        popped = true;
     else
         if !serial_btree_is_empty(bbtree) then
-            serial_btree_remove(bbtree,
-                                serial_btree_peek_min(bbtree));
-            popped = true;
+            popped = serial_btree_peek_min(bbtree);
+            serial_btree_remove(bbtree, popped);
         fi
     fi
 
