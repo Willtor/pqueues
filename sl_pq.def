@@ -205,8 +205,8 @@ begin
         fi
         // TODO: Swap out for atomic swap
         var popped = curr.priority;
-        var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
-        if res then
+        var res = __builtin_swap(&curr.state, DELETED);
+        if res == ACTIVE then
             mark_pointers(curr);
             return popped;
         fi
@@ -226,8 +226,8 @@ begin
             continue;
         fi
         // TODO: Swap out for atomic swap
-        var res = __builtin_cas(&curr.state, ACTIVE, DELETED);
-        if res then
+        var res = __builtin_swap(&curr.state, DELETED);
+        if res == ACTIVE then
             mark_pointers(curr);
             var popped = curr.priority;
             retire curr;
