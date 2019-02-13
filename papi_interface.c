@@ -20,10 +20,11 @@ int start_counters() {
 long long* stop_counters() {
   long long *counters = forkscan_malloc(sizeof(int64_t) * NUM_EVENTS);
   bool res = PAPI_stop_counters(counters, NUM_EVENTS) == PAPI_OK;
-  if(res) {
-    return counters;
-  } else {
-    forkscan_free(counters);
-    return NULL;
+  if(!res) {
+    int i;
+    for (i = 0; i < NUM_EVENTS; ++i) {
+        counters[i] = 0;
+    }
   }
+  return counters;
 }
