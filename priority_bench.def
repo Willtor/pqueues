@@ -193,6 +193,20 @@ typedef init_thread_data_t =
    ]
  ]
 
+@[define [make-pipeline-loop insert pop-min]
+   [parse-stmts
+     while ptd.state[0] == STATE_RUN do
+         var delta i64 = fast_rand(&seed) % config.upper_bound;
+         var val = @[emit-expr pop-min] + delta;
+         @[emit-expr insert];
+         stats.insert_attempts++;
+         stats.insert_successes++;
+         stats.remove_attempts++;
+         stats.remove_successes++;
+     od
+   ]
+ ]
+
 @[define [make-cond benchmark policy]
    [parse-expr @[emit-ident benchmark] == bench
                && @[emit-ident policy] == policy] ]
@@ -581,11 +595,20 @@ begin
        ]
      ]
 
+    @[define [pipeline-case config]
+       [let [[bench [car config]]
+             [policy [car [cdr config]]]
+             [insert [list-ref config 3]]
+             [pop-min [list-ref config 4]]]
+         [list [make-cond bench policy] [make-pipeline-loop insert pop-min]]
+       ]
+     ]
+
     switch config.pattern with
     xcase PATTERN_RANDOM:
         @[construct-if [map random-case benchmarks]]
     xcase PATTERN_PIPELINE:
-
+        @[construct-if [map pipeline-case benchmarks]]
     ocase _:
         fprintf(stderr, "Unsupported pattern.\n");
         exit(1);
