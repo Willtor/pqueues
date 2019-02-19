@@ -53,17 +53,22 @@ typedef memory_policy_t = enum
     | POLICY_RETIRE
     ;
 
+typedef pattern_t = enum
+    | PATTERN_RANDOM
+    | PATTERN_PIPELINE
+    ;
+
 typedef state_t = enum
     | STATE_WAIT
     | STATE_RUN
     | STATE_END
     ;
 
-
 typedef config_t =
     {
         benchmark      benchmark_t,
         policy         memory_policy_t,
+        pattern        pattern_t,
         csv            bool,
         duration_s     i32,
         thread_count   i32,
@@ -198,6 +203,20 @@ typedef init_thread_data_t =
    ]
  ]
 
+@[define [make-pipeline-loop insert pop-min]
+   [parse-stmts
+     while ptd.state[0] == STATE_RUN do
+         var delta i64 = fast_rand(&seed) % config.upper_bound;
+         var val = @[emit-expr pop-min] + delta;
+         @[emit-expr insert];
+         stats.insert_attempts++;
+         stats.insert_successes++;
+         stats.remove_attempts++;
+         stats.remove_successes++;
+     od
+   ]
+ ]
+
 @[define [make-cond benchmark policy]
    [parse-expr @[emit-ident benchmark] == bench
                && @[emit-ident policy] == policy] ]
@@ -263,6 +282,15 @@ begin
     esac
 end
 
+def string_of_pattern (pattern pattern_t) -> *char
+begin
+    switch pattern with
+    xcase PATTERN_RANDOM: return "random";
+    xcase PATTERN_PIPELINE: return "pipeline";
+    xcase _: return "unknown pattern";
+    esac
+end
+
 def help (bench *char) -> void
 begin
     printf("Usage: %s [OPTIONS]\n", bench);
@@ -290,6 +318,9 @@ begin
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
+    printf("  -a <pattern>: Set the access pattern. (default = random)\n");
+    printf("     * random: Insert random values within the configured range.\n");
+    printf("     * pipeline: Pop a value, push the same value with an added delta.\n");
     printf("  -i <n>: Initial pqueue size. (default = 256)\n");
     printf("  -r <n>: Range upper bound [0-n). (default = 512)\n");
     printf("  -c <n>: Floating point multiplier for the multiqueue.  (default 4.0)\n");
@@ -343,7 +374,8 @@ end
 def read_args (argc i32, argv **char) -> config_t
 begin
     var config config_t =
-        { FHSL_LF, POLICY_LEAKY, false, 1, 1, 256, 512, nil, 4.0f };
+        { FHSL_LF, POLICY_LEAKY, PATTERN_RANDOM,
+          false, 1, 1, 256, 512, nil, 4.0f };
 
     for var i = 1; i < argc; ++i do
         switch argv[i] with
@@ -407,6 +439,19 @@ begin
                 printf("unknown memory policy: %s\n", argv[i]);
                 exit(1);
             esac
+        xcase "-a":
+            ++i;
+            if i >= argc then
+                fprintf(stderr, "error: -a requires an argument.\n");
+                exit(1);
+            fi
+            switch argv[i] with
+            xcase "random": config.pattern = PATTERN_RANDOM;
+            xcase "pipeline": config.pattern = PATTERN_PIPELINE;
+            xcase _:
+                printf("unknown pattern: %s\n", argv[i]);
+                exit(1);
+            esac
         xcase "-i":
             ++i;
             if i >= argc then
@@ -461,9 +506,10 @@ begin
     @[construct-if [map legal-config benchmarks]]
 
     printf("Unsupported configuration:\n");
-    printf("  benchmark: %s\n  policy: %s\n",
+    printf("  benchmark: %s\n  policy: %s\n  pattern: %s\n",
            string_of_benchmark(config.benchmark),
-           string_of_policy(config.policy));
+           string_of_policy(config.policy),
+           string_of_pattern(config.pattern));
     printf("No implementation for this combination.\n");
     exit(1);
 end
@@ -474,6 +520,7 @@ begin
     printf("--------- -------------\n");
     printf("  benchmark    : %s\n", string_of_benchmark(config.benchmark));
     printf("  mem_policy   : %s\n", string_of_policy(config.policy));
+    printf("  pattern      : %s\n", string_of_pattern(config.pattern));
     printf("  duration (s) : %d\n", config.duration_s);
     printf("  thread count : %d\n", config.thread_count);
     printf("  initial size : %lld\n", config.init_size);
@@ -519,13 +566,14 @@ end
 
 def print_csv (config *config_t, stats *stats_t, runtime f64) -> void
 begin
-    puts("# fields: name, benchmark, policy, threads, init_size, upper_bound, ops/sec");
+    puts("# fields: name, benchmark, policy, pattern, threads, init_size, upper_bound, ops/sec");
 
     var total_ops = stats.insert_successes + stats.remove_successes;
 
-    printf("pqueue_bench, %s, %s, %d, %lld, %lld, %lld\n",
+    printf("pqueue_bench, %s, %s, %s, %d, %lld, %lld, %lld\n",
            string_of_benchmark(config.benchmark),
            string_of_policy(config.policy),
+           string_of_pattern(config.pattern),
            config.thread_count,
            config.init_size,
            config.upper_bound,
@@ -560,7 +608,25 @@ begin
        ]
      ]
 
-    @[construct-if [map random-case benchmarks]]
+    @[define [pipeline-case config]
+       [let [[bench [car config]]
+             [policy [car [cdr config]]]
+             [insert [list-ref config 3]]
+             [pop-min [list-ref config 4]]]
+         [list [make-cond bench policy] [make-pipeline-loop insert pop-min]]
+       ]
+     ]
+
+    switch config.pattern with
+    xcase PATTERN_RANDOM:
+        @[construct-if [map random-case benchmarks]]
+    xcase PATTERN_PIPELINE:
+        @[construct-if [map pipeline-case benchmarks]]
+    ocase _:
+        fprintf(stderr, "Unsupported pattern.\n");
+        exit(1);
+    esac
+
     ptd.PAPI_counters = stop_counters();
     printf("FINISHED\n");
 
