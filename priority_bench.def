@@ -26,6 +26,7 @@ import "c_lj_pq.h";
 import "mq_locked_btree.defi";
 import "c_hunt_heap.h";
 import "c_mounds.h";
+import "c_apq_server.h";
 
 typedef benchmark_t = enum
     | FHSL_LF
@@ -44,6 +45,7 @@ typedef benchmark_t = enum
     | C_HUNT
     | C_MOUNDS
     | C_FHSL_FC
+    | C_APQ_SERVER
     ;
 
 typedef memory_policy_t = enum
@@ -101,6 +103,8 @@ typedef init_thread_data_t =
    [parse-expr @[emit-ident fname](&seed, pqueue, val) ]]
 @[define [id-add fname]
    [parse-expr @[emit-ident fname](pqueue, val, ptd.id) ]]
+@[define [id-add-seed fname]
+   [parse-expr @[emit-ident fname](&seed, pqueue, val, ptd.id) ]]
 @[define [default-pop-min fname]
    [parse-expr true == @[emit-ident fname](pqueue) ]]
 @[define [seed-pop-min fname]
@@ -165,6 +169,12 @@ typedef init_thread_data_t =
       ["C_FHSL_FC" "POLICY_RETIRE"
        [id-add "c_fhsl_fc_add"]
        [id-pop-min "c_fhsl_fc_pop_min"] ]
+      ["C_APQ_SERVER" "POLICY_RETIRE"
+       [id-add-seed "c_apq_server_add"]
+       [id-pop-min "c_apq_server_pop_min"]]
+      ["C_APQ_SERVER" "POLICY_LEAKY"
+       [id-add-seed "c_apq_server_add"]
+       [id-pop-min "c_apq_server_pop_min_leaky"]]
     ]
  ]
 
@@ -239,6 +249,7 @@ begin
     xcase MQ_LOCKED_BTREE: return "mq_locked_btree";
     xcase C_HUNT: return "c_hunt";
     xcase C_MOUNDS: return "c_mounds";
+    xcase C_APQ_SERVER: return "c_apq_server";
     xcase _: return "unknown benchmark";
     esac
 end
@@ -275,6 +286,7 @@ begin
     printf("     * c_hunt: Hunt et al heap based priority queue. Written in C.\n");
     printf("     * c_mounds: Lock-based mounds priority queue. Written in C.\n");
     printf("     * c_fhsl_fc: Use the flat combining skiplist written in C.\n");
+    printf("     * c_apq_server: Use the flat combining skiplist with a server thread, written in C.\n");
     printf("  -p <mem_policy>: Set the memory policy. (default = leaky)\n");
     printf("     * leaky: Leak removed nodes.\n");
     printf("     * retire: Use Forkscan to reclaim removed nodes.\n");
@@ -375,6 +387,7 @@ begin
             xcase "c_hunt": config.benchmark = C_HUNT;
             xcase "c_mounds": config.benchmark = C_MOUNDS;
             xcase "c_fhsl_fc": config.benchmark = C_FHSL_FC;
+            xcase "c_apq_server": config.benchmark = C_APQ_SERVER;
             xcase _:
                 printf("unknown benchmark: %s\n", argv[i]);
                 exit(1);
@@ -604,6 +617,8 @@ begin
             res = c_mound_pq_add(&seed, config.pqueue, val);
         xcase C_FHSL_FC:
             res = c_fhsl_fc_add(config.pqueue, val, 0) == 1;
+        xcase C_APQ_SERVER:
+            res = c_apq_server_add(&seed, config.pqueue, val, 0) == 1;
         xcase _:
             printf("error: unable to initialize unknown pqueue.\n");
             exit(1);
@@ -653,6 +668,8 @@ begin
         config.pqueue = c_mound_pq_create(config.upper_bound);
     xcase C_FHSL_FC:
         config.pqueue = c_fhsl_fc_create(config.thread_count);
+    xcase C_APQ_SERVER:
+        config.pqueue = c_apq_server_create(config.thread_count, config.upper_bound / config.thread_count);
     xcase _:
         printf("error: unable to initialize unknown pqueue.\n");
         exit(1);
@@ -717,7 +734,7 @@ begin
               i,
               &state,
               { 0, 0, 0, 0 },
-              new [5]i64
+              nil
             };
         var ret = pthread_create(&tids[i], nil, thread, &ptds[i]);
         if ret != 0 then

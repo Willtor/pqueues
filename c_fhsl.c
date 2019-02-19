@@ -10,13 +10,13 @@
 #include <stdbool.h>
 #include <forkscan.h>
 #include <stdio.h>
-
-
-#define N 20
-#define BOTTOM 0
+#include <time.h>
 
 typedef struct node_t node_t;
 typedef node_t* node_ptr;
+
+#define N 20
+#define BOTTOM 0
 
 struct node_t {
   int64_t key;
@@ -26,8 +26,8 @@ struct node_t {
 
 struct c_fhsl_t {
   node_t head, tail;
+  uint64_t seed;
 };
-
 
 static node_ptr node_create(int64_t key, int32_t toplevel){
   node_ptr node = forkscan_malloc(sizeof(node_t));
@@ -57,6 +57,7 @@ c_fhsl_t * c_fhsl_create() {
     fhsl->head.next[i] = &fhsl->tail;
     fhsl->tail.next[i] = NULL;
   }
+  fhsl->seed = time(NULL);
   return fhsl;
 }
 
@@ -91,12 +92,11 @@ static bool find(c_fhsl_t *set, int64_t key,
     succs[level] = right;
   }
   return succs[BOTTOM]->key == key;
-  
 }
 
 /** Add a node to the skiplist.
  */
-int c_fhsl_add(uint64_t *seed, c_fhsl_t * set, int64_t key) {
+int c_fhsl_add(c_fhsl_t * set, int64_t key) {
   node_ptr preds[N], succs[N];
   int32_t toplevel = -1;
   node_ptr node = NULL;
@@ -105,7 +105,7 @@ int c_fhsl_add(uint64_t *seed, c_fhsl_t * set, int64_t key) {
     return false;
   }
   if(node == NULL) { 
-    toplevel = random_level(seed, N);
+    toplevel = random_level(&set->seed, N);
     node = node_create(key, toplevel); 
   }
   for(int64_t i = BOTTOM; i <= toplevel; ++i) {

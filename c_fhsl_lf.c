@@ -13,9 +13,6 @@
 #define N 20
 #define BOTTOM 0
 
-typedef struct node_t node_t;
-typedef node_t* node_ptr;
-typedef struct node_unpacked_t node_unpacked_t;
 
 struct node_t {
   int64_t key;
@@ -91,10 +88,24 @@ int c_fhsl_lf_contains(c_fhsl_lf_t *set, int64_t key) {
   return false;
 }
 
+int c_fhsl_lf_contains_serial(c_fhsl_lf_t * set, int64_t key) {
+  node_ptr node = &set->head;
+  for(int64_t i = N - 1; i >= 0; i--) {
+    node_ptr next = atomic_load_explicit(&node->next[i], memory_order_relaxed);
+    while(next->key <= key) {
+      node = next; 
+      next = atomic_load_explicit(&node->next[i], memory_order_relaxed);
+    }
+    if(node->key == key) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool find(c_fhsl_lf_t *set, int64_t key, 
   node_ptr preds[N], node_ptr succs[N]) {
   bool marked, snip;
-  // node_ptr pred = NULL, curr = NULL, succ = NULL;
 retry:
   while(true) {
     node_ptr left = &set->head, right = NULL;
@@ -134,6 +145,22 @@ retry:
   }
 }
 
+static bool find_serial(c_fhsl_lf_t *set, int64_t key, 
+  node_ptr preds[N], node_ptr succs[N]) {
+  node_ptr left = &set->head, right = left;
+  for(int64_t level = N - 1; level >= BOTTOM; --level) {
+    right = left->next[level];
+    // Has the right not gone far enough?        
+    while(right->key < key) {
+      left = right;
+      right = right->next[level];
+    }
+    preds[level] = left;
+    succs[level] = right;
+  }
+  return succs[BOTTOM]->key == key;
+}
+
 /** Add a node, lock-free, to the skiplist.
  */
 int c_fhsl_lf_add(uint64_t *seed, c_fhsl_lf_t * set, int64_t key) {
@@ -165,6 +192,25 @@ int c_fhsl_lf_add(uint64_t *seed, c_fhsl_lf_t * set, int64_t key) {
     }
     return true;
   }
+}
+
+int c_fhsl_lf_add_serial(uint64_t *seed, c_fhsl_lf_t * set, int64_t key) {
+  node_ptr preds[N], succs[N];
+  int32_t toplevel = -1;
+  node_ptr node = NULL;
+  if(find(set, key, preds, succs)) {
+    forkscan_free((void*)node);
+    return false;
+  }
+  if(node == NULL) { 
+    toplevel = random_level(seed, N);
+    node = node_create(key, toplevel); 
+  }
+  for(int64_t i = BOTTOM; i <= toplevel; ++i) {
+    node->next[i] = succs[i];
+    preds[i]->next[i] = node;
+  }
+  return true;
 }
 
 /** Remove a node, lock-free, from the skiplist.
@@ -204,6 +250,19 @@ int c_fhsl_lf_remove_leaky(c_fhsl_lf_t * set, int64_t key) {
   }
 }
 
+int c_fhsl_lf_remove_leaky_serial(c_fhsl_lf_t * set, int64_t key) {
+  node_ptr preds[N], succs[N];
+  if(!find(set, key, preds, succs)) {
+    return false;
+  }
+  node_ptr node = succs[BOTTOM];
+  for(int64_t i = BOTTOM; i <= node->toplevel; ++i) {
+    node_ptr next = atomic_load_explicit(&node->next[i], memory_order_relaxed);
+    atomic_store_explicit(&preds[i]->next[i], next, memory_order_relaxed);
+  }
+  return true;
+}
+
 /** Remove a node, lock-free, from the skiplist.
  */
 int c_fhsl_lf_remove(c_fhsl_lf_t * set, int64_t key) {
@@ -241,70 +300,111 @@ int c_fhsl_lf_remove(c_fhsl_lf_t * set, int64_t key) {
   }
 }
 
+/** Remove a node, lock-free, from the skiplist.
+ */
+int c_fhsl_lf_remove_serial(c_fhsl_lf_t * set, int64_t key) {
+  node_ptr preds[N], succs[N];
+  if(!find(set, key, preds, succs)) {
+    return false;
+  }
+  node_ptr node = succs[BOTTOM];
+  for(int64_t i = BOTTOM; i <= node->toplevel; ++i) {
+    preds[i]->next[i] = node->next[i];
+  }
+  forkscan_retire(node);
+  return true;
+}
+
 /** Pop the front node from the list.  Return true iff there was a node to pop.
  */
 int c_fhsl_lf_pop_min_leaky (c_fhsl_lf_t *set) {
-    node_ptr preds[N], succs[N];
-    node_ptr succ = NULL;
-    while(true) {
-        node_ptr node_to_remove = atomic_load_explicit(&set->head.next[0], memory_order_relaxed);
-        if (node_to_remove == &set->tail) {
-            return false;
-        }
-        for(int64_t level = node_to_remove->toplevel; level >= 1; --level) {
-          preds[level] = &set->head;
-          succs[level] = node_to_remove;
-        }
-
-        for(int64_t level = node_to_remove->toplevel; level >= 1; --level) {
-            succ = node_to_remove->next[level];
-            bool marked = node_is_marked(succ);
-            while(!marked) {
-                bool _ = atomic_compare_exchange_weak_explicit(&node_to_remove->next[level], &succ,
-                              node_mark(succ), memory_order_relaxed, memory_order_relaxed);
-                succ = atomic_load_explicit(&node_to_remove->next[level], memory_order_relaxed);
-                marked = node_is_marked(succ);
-            }
-        }
-        succ = node_unmark(atomic_load_explicit(&node_to_remove->next[BOTTOM], memory_order_relaxed));
-
-        if (atomic_compare_exchange_weak_explicit(&node_to_remove->next[BOTTOM], &succ, node_mark(succ), memory_order_relaxed, memory_order_relaxed)) {
-            bool _ = find(set, node_to_remove->key, preds, succs);
-            return true;
-        }
+  node_ptr preds[N], succs[N];
+  node_ptr succ = NULL;
+  while(true) {
+    node_ptr node_to_remove = atomic_load_explicit(&set->head.next[0], memory_order_relaxed);
+    if (node_to_remove == &set->tail) {
+      return false;
     }
+    for(int64_t level = node_to_remove->toplevel; level >= 1; --level) {
+      preds[level] = &set->head;
+      succs[level] = node_to_remove;
+    }
+
+    for(int64_t level = node_to_remove->toplevel; level >= 1; --level) {
+      succ = node_to_remove->next[level];
+      bool marked = node_is_marked(succ);
+      while(!marked) {
+        bool _ = atomic_compare_exchange_weak_explicit(&node_to_remove->next[level], &succ,
+                      node_mark(succ), memory_order_relaxed, memory_order_relaxed);
+        succ = atomic_load_explicit(&node_to_remove->next[level], memory_order_relaxed);
+        marked = node_is_marked(succ);
+      }
+    }
+    succ = node_unmark(atomic_load_explicit(&node_to_remove->next[BOTTOM], memory_order_relaxed));
+
+    if (atomic_compare_exchange_weak_explicit(&node_to_remove->next[BOTTOM], &succ, node_mark(succ), memory_order_relaxed, memory_order_relaxed)) {
+      bool _ = find(set, node_to_remove->key, preds, succs);
+      return true;
+    }
+  }
 }
 
+int c_fhsl_lf_pop_min_leaky_serial (c_fhsl_lf_t *set) {
+  node_ptr head_node = set->head.next[BOTTOM];
+  if(head_node != &set->tail) {
+    node_ptr node_popped = head_node;
+    int64_t toplevel = node_popped->toplevel;
+    for(int64_t i = BOTTOM; i <= toplevel; i++) {
+      set->head.next[i] = node_popped->next[i];
+    }
+    return true;
+  }
+  return false;
+}
 
 int c_fhsl_lf_pop_min(c_fhsl_lf_t *set) {
-    node_ptr preds[N], succs[N];
-    node_ptr succ = NULL;
-    while(true) {
-        node_ptr node_to_remove = atomic_load_explicit(&set->head.next[BOTTOM], memory_order_relaxed);
-        if (node_to_remove == &set->tail) {
-            return false;
-        }
-        for(int64_t level = node_to_remove->toplevel; level >= 1; --level) {
-          preds[level] = &set->head;
-          succs[level] = node_to_remove;
-        }
-
-        for(int64_t level = node_to_remove->toplevel; level >= 1; --level) {
-            succ = node_to_remove->next[level];
-            bool marked = node_is_marked(succ);
-            while(!marked) {
-                bool _ = atomic_compare_exchange_weak_explicit(&node_to_remove->next[level], &succ,
-                              node_mark(succ), memory_order_relaxed, memory_order_relaxed);
-                succ = atomic_load_explicit(&node_to_remove->next[level], memory_order_relaxed);
-                marked = node_is_marked(succ);
-            }
-        }
-        succ = node_unmark(atomic_load_explicit(&node_to_remove->next[BOTTOM], memory_order_relaxed));
-
-        if (atomic_compare_exchange_weak_explicit(&node_to_remove->next[BOTTOM], &succ, node_mark(succ), memory_order_relaxed, memory_order_relaxed)) {
-            bool _ = find(set, node_to_remove->key, preds, succs);
-            forkscan_retire(node_to_remove);
-            return true;
-        }
+  node_ptr preds[N], succs[N];
+  node_ptr succ = NULL;
+  while(true) {
+    node_ptr node_to_remove = atomic_load_explicit(&set->head.next[BOTTOM], memory_order_relaxed);
+    if (node_to_remove == &set->tail) {
+      return false;
     }
+    for(int64_t level = node_to_remove->toplevel; level >= 1; --level) {
+      preds[level] = &set->head;
+      succs[level] = node_to_remove;
+    }
+
+    for(int64_t level = node_to_remove->toplevel; level >= 1; --level) {
+      succ = node_to_remove->next[level];
+      bool marked = node_is_marked(succ);
+      while(!marked) {
+        bool _ = atomic_compare_exchange_weak_explicit(&node_to_remove->next[level], &succ,
+                      node_mark(succ), memory_order_relaxed, memory_order_relaxed);
+        succ = atomic_load_explicit(&node_to_remove->next[level], memory_order_relaxed);
+        marked = node_is_marked(succ);
+      }
+    }
+    succ = node_unmark(atomic_load_explicit(&node_to_remove->next[BOTTOM], memory_order_relaxed));
+
+    if (atomic_compare_exchange_weak_explicit(&node_to_remove->next[BOTTOM], &succ, node_mark(succ), memory_order_relaxed, memory_order_relaxed)) {
+      bool _ = find(set, node_to_remove->key, preds, succs);
+      forkscan_retire(node_to_remove);
+      return true;
+    }
+  }
+}
+
+int c_fhsl_lf_pop_min_serial (c_fhsl_lf_t *set) {
+  node_ptr head_node = set->head.next[BOTTOM];
+  if(head_node != &set->tail) {
+    node_ptr node_popped = head_node;
+    int64_t toplevel = node_popped->toplevel;
+    for(int64_t i = BOTTOM; i <= toplevel; i++) {
+      set->head.next[i] = node_popped->next[i];
+    }
+    forkscan_retire(node_popped);
+    return true;
+  }
+  return false;
 }
