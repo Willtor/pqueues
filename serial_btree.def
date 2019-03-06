@@ -1,50 +1,78 @@
 import "stdio.h";
 
+@[define
+   [make-btree keytype suffix]
+   [let [[leaf [string-append "leaf" suffix]]
+         [node [string-append "node" suffix]]
+         [serial_btree [string-append "serial_btree" suffix]]
+         [make_leaf [string-append "make_leaf" suffix]]
+         [make_node [string-append "make_node" suffix]]
+         [serial_btree_print [string-append "serial_btree_print" suffix]]
+         [node_print [string-append "node_print" suffix]]
+
+         [serial_btree_create [string-append "serial_btree_create" suffix]]
+         [destroy_node [string-append "destroy_node" suffix]]
+         [serial_btree_destroy [string-append "serial_btree_destroy" suffix]]
+         [search_node [string-append "search_node" suffix]]
+         [serial_btree_contains [string-append "serial_btree_contains" suffix]]
+         [serial_btree_insert [string-append "serial_btree_insert" suffix]]
+         [split_child [string-append "split_child" suffix]]
+         [insert_nonfull [string-append "insert_nonfull" suffix]]
+         [serial_btree_remove [string-append "serial_btree_remove" suffix]]
+         [remove_key [string-append "remove_key" suffix]]
+         [merge_siblings [string-append "merge_siblings" suffix]]
+         [index_of [string-append "index_of" suffix]]
+         [serial_btree_peek_min [string-append "serial_btree_peek_min" suffix]]
+         [serial_btree_is_empty [string-append "serial_btree_is_empty" suffix]]
+         [peek_min [string-append "peek_min" suffix]]
+        ]
+     [parse-stmts
+
 // Leaf for t = 2.
-typedef leaf =
+typedef @[emit-ident leaf] =
     { n         i32,
       is_leaf   bool,
-      keys      [3]i64
+      keys      [3]@[emit-ident keytype]
     };
 
 // Internal node for t = 2.
-typedef node =
+typedef @[emit-ident node] =
     { n         i32,
       is_leaf   bool,
-      keys      [3]i64,
-      children  [4]*node
+      keys      [3]@[emit-ident keytype],
+      children  [4]*@[emit-ident node]
     };
 
 /** btree object.
  */
 export opaque
-typedef serial_btree =
-    { root *node };
+typedef @[emit-ident serial_btree] =
+    { root *@[emit-ident node] };
 
-def make_leaf () -> *leaf
+def @[emit-ident make_leaf] () -> *@[emit-ident leaf]
 begin
-    var leaf = new leaf { n       : 0,
-                          is_leaf : true
-                        };
+    var leaf = new @[emit-ident leaf] { n       : 0,
+                                        is_leaf : true
+                                       };
     return leaf;
 end
 
-def make_node () -> *node
+def @[emit-ident make_node] () -> *@[emit-ident node]
 begin
-    var node = new node { n       : 0,
-                          is_leaf : false
-                        };
+    var node = new @[emit-ident node] { n       : 0,
+                                        is_leaf : false
+                                      };
     return node;
 end
 
 export
-def serial_btree_print (btree *serial_btree) -> void
+def @[emit-ident serial_btree_print] (btree *@[emit-ident serial_btree]) -> void
 begin
     printf("btree at %p:\n", btree);
-    node_print(btree.root, 1);
+    @[emit-ident node_print](btree.root, 1);
 end
 
-def node_print (node *node, depth i32) -> void
+def @[emit-ident node_print] (node *@[emit-ident node], depth i32) -> void
 begin
     for var i = 0; i < depth; ++i do
         printf("  ");
@@ -62,7 +90,7 @@ begin
 
     if !node.is_leaf then
         for var i = 0; i <= node.n; ++i do
-            node_print(node.children[i], depth + 1);
+            @[emit-ident node_print](node.children[i], depth + 1);
         od
     fi
 end
@@ -70,18 +98,18 @@ end
 /** Create an empty btree.
  */
 export
-def serial_btree_create () -> *serial_btree
+def @[emit-ident serial_btree_create] () -> *@[emit-ident serial_btree]
 begin
-    var root = cast *node (make_leaf());
-    var btree = new serial_btree { root : root };
+    var root = cast *@[emit-ident node] (@[emit-ident make_leaf]());
+    var btree = new @[emit-ident serial_btree] { root : root };
     return btree;
 end
 
-def destroy_node (node *node) -> void
+def @[emit-ident destroy_node] (node *@[emit-ident node]) -> void
 begin
     if !node.is_leaf then
         for var i = 0; i <= node.n; ++i do
-            destroy_node(node.children[i]);
+            @[emit-ident destroy_node](node.children[i]);
         od
     fi
     delete node;
@@ -90,13 +118,14 @@ end
 /** Destroy a btree.
  */
 export
-def serial_btree_destroy (btree *serial_btree) -> void
+def @[emit-ident serial_btree_destroy] (btree *@[emit-ident serial_btree]) -> void
 begin
-    destroy_node(btree.root);
+    @[emit-ident destroy_node](btree.root);
     delete btree;
 end
 
-def search_node (node *node, key i64) -> bool
+def @[emit-ident search_node] (node *@[emit-ident node],
+                               key @[emit-ident keytype]) -> bool
 begin
     var i i32;
     for i = 0; i < node.n  && key > node.keys[i]; ++i do
@@ -106,37 +135,39 @@ begin
     elif node.is_leaf then
         return false;
     fi
-    return search_node(node.children[i], key);
+    return @[emit-ident search_node](node.children[i], key);
 end
 
 /** Search a btree for a given key.
  */
 export
-def serial_btree_contains (btree *serial_btree, key i64) -> bool
+def @[emit-ident serial_btree_contains] (btree *@[emit-ident serial_btree],
+                                         key @[emit-ident keytype]) -> bool
 begin
-    return search_node(btree.root, key);
+    return @[emit-ident search_node](btree.root, key);
 end
 
 /** Insert a new value into the btree.
  */
 export
-def serial_btree_insert (btree *serial_btree, key i64) -> void
+def @[emit-ident serial_btree_insert] (btree *@[emit-ident serial_btree],
+                                       key @[emit-ident keytype]) -> void
 begin
     var root = btree.root;
     if root.n == /*2t-1=*/3 then
-        var s = make_node();
+        var s = @[emit-ident make_node]();
         btree.root = s;
         s.children[0] = root;
-        split_child(s, 0);
-        insert_nonfull(s, key);
+        @[emit-ident split_child](s, 0);
+        @[emit-ident insert_nonfull](s, key);
     else
-        insert_nonfull(root, key);
+        @[emit-ident insert_nonfull](root, key);
     fi
 end
 
-def split_child (x *node, i i32) -> void
+def @[emit-ident split_child] (x *@[emit-ident node], i i32) -> void
 begin
-    var z = make_node();
+    var z = @[emit-ident make_node]();
     var y = x.children[i];
     z.is_leaf = y.is_leaf;
     z.n = /*t-1=*/1;
@@ -160,7 +191,8 @@ begin
     ++x.n;
 end
 
-def insert_nonfull (node *node, key i64) -> void
+def @[emit-ident insert_nonfull] (node *@[emit-ident node],
+                                  key @[emit-ident keytype]) -> void
 begin
     var i = node.n - 1;
     if node.is_leaf then
@@ -176,12 +208,12 @@ begin
         od
         ++i;
         if node.children[i].n == /*2t-1*/3 then
-            split_child(node, i);
+            @[emit-ident split_child](node, i);
             if key > node.keys[i] then
                 ++i;
             fi
         fi
-        insert_nonfull(node.children[i], key);
+        @[emit-ident insert_nonfull](node.children[i], key);
     fi
 end
 
@@ -189,12 +221,13 @@ end
  *  present to be removed.
  */
 export
-def serial_btree_remove (btree *serial_btree, key i64) -> bool
+def @[emit-ident serial_btree_remove] (btree *@[emit-ident serial_btree],
+                                       key @[emit-ident keytype]) -> bool
 begin
     if btree.root.n < 1 then
         return false;
     fi
-    var removed = remove_key(btree.root, key);
+    var removed = @[emit-ident remove_key](btree.root, key);
     if btree.root.n < 1 && !btree.root.is_leaf then
         // It's possible the root becomes empty of keys, but still has a
         // populated child.  This can't happen in deep nodes; the root is
@@ -206,9 +239,10 @@ begin
     return removed;
 end
 
-def remove_key (node *node, key i64) -> bool
+def @[emit-ident remove_key] (node *@[emit-ident node],
+                              key @[emit-ident keytype]) -> bool
 begin
-    var i = index_of(node, key);
+    var i = @[emit-ident index_of](node, key);
 
     // CLRS [p500]: Case 1.
     if node.is_leaf then
@@ -231,7 +265,7 @@ begin
         var y = node.children[i];
         if y.n >= /*t=*/2 then
             var k_prime = y.keys[y.n - 1];
-            remove_key(y, k_prime);
+            @[emit-ident remove_key](y, k_prime);
             node.keys[i] = k_prime;
             // node.n didn't change.
             return true;
@@ -241,15 +275,15 @@ begin
         var z = node.children[i + 1];
         if z.n >= /*t=*/2 then
             var k_prime = z.keys[0];
-            remove_key(z, k_prime);
+            @[emit-ident remove_key](z, k_prime);
             node.keys[i] = k_prime;
             // node.n didn't change.
             return true;
         fi
 
         // CLFS [p501]: Case 2c.
-        merge_siblings(node, i);
-        return remove_key(y, key); // true, but tail-recursive.
+        @[emit-ident merge_siblings](node, i);
+        return @[emit-ident remove_key](y, key); // true, but tail-recursive.
     fi
 
     // CLRS [p501]: Case 3.
@@ -300,18 +334,18 @@ begin
         // CLRS [p502]: Case 3b.
         else // Merge siblings.  Prefer left.
             if i > 0 then
-                merge_siblings(node, i - 1);
+                @[emit-ident merge_siblings](node, i - 1);
             else
-                merge_siblings(node, i);
+                @[emit-ident merge_siblings](node, i);
             fi
         fi
 
     fi
-    i = index_of(node, key); // Find i, again.
-    return remove_key(node.children[i], key);
+    i = @[emit-ident index_of](node, key); // Find i, again.
+    return @[emit-ident remove_key](node.children[i], key);
 end
 
-def merge_siblings (node *node, i i32) -> void
+def @[emit-ident merge_siblings] (node *@[emit-ident node], i i32) -> void
 begin
     var y = node.children[i];
     var z = node.children[i + 1];
@@ -340,7 +374,8 @@ begin
     delete z;
 end
 
-def index_of (node *node, key i64) -> i32
+def @[emit-ident index_of] (node *@[emit-ident node],
+                            key @[emit-ident keytype]) -> i32
 begin
     var i = 0;
     while i < node.n && node.keys[i] < key do
@@ -353,21 +388,31 @@ end
  *  the btree is empty.
  */
 export
-def serial_btree_peek_min (btree *serial_btree) -> i64
+def @[emit-ident serial_btree_peek_min] (btree *@[emit-ident serial_btree])
+                                        -> @[emit-ident keytype]
 begin
-    return peek_min(btree.root);
+    return @[emit-ident peek_min](btree.root);
 end
 
 export
-def serial_btree_is_empty (btree *serial_btree) -> bool
+def @[emit-ident serial_btree_is_empty] (btree *@[emit-ident serial_btree])
+                                        -> bool
 begin
     return btree.root.n == 0;
 end
 
-def peek_min (node *node) -> i64
+def @[emit-ident peek_min] (node *@[emit-ident node]) -> @[emit-ident keytype]
 begin
     if node.is_leaf then
         return node.keys[0];
     fi
-    return peek_min(node.children[0]);
+    return @[emit-ident peek_min](node.children[0]);
 end
+
+    ]
+  ]
+]
+
+@[make-btree "i64" ""]
+
+@[make-btree "f64" "_f64"]

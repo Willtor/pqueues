@@ -1,5 +1,5 @@
 DEF ?= def
-DEFGHI = defghi
+DEFGHI ?= defghi
 SET_BENCH = set_bench
 PRIORITY_BENCH = priority_bench
 
